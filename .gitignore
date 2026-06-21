@@ -9,3 +9,8 @@ npm-debug.log*
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+
+# Keep local project notes out of the shared repository.
+README.md
+CONTRIBUTING.md
+docs/

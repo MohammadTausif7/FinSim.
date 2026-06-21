@@ -1,0 +1,41 @@
+name: Feature
+description: A scoped product, data, or ML deliverable
+title: "[Feature]: "
+labels: ["feature"]
+body:
+  # Start with the outcome so an issue remains understandable outside meetings.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What becomes possible when this is done?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: increment
+    attributes:
+      label: Increment
+      options: ["Increment 1", "Increment 2"]
+    validations:
+      required: true
+  - type: dropdown
+    id: estimate
+    attributes:
+      label: Estimate
+      options: ["1", "2", "3", "5"]
+    validations:
+      required: true
+  - type: textarea
+    id: test
+    attributes:
+      label: Test plan
+      description: Include fixtures, metrics, edge cases, or UI states.
+    validations:
+      required: true

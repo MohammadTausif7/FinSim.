@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finsim-document-intelligence"
+version = "0.1.0"
+description = "Statement inspection, extraction, normalization, and reconciliation for FinSim"
+requires-python = ">=3.11"
+dependencies = [
+  "pdfplumber>=0.11,<1"
+]
+
+[project.scripts]
+finsim-parse = "finsim_parser.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.coverage.run]
+source = ["finsim_parser"]
+branch = true

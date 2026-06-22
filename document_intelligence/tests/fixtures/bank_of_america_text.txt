@@ -1,0 +1,27 @@
+BANK OF AMERICA
+Visa Signature
+December 8 - January 7, 2026
+Account Summary/Payment Information
+Previous Balance $500.00
+Payments and Other Credits -$200.00
+Purchases and Adjustments $115.00
+Fees Charged $3.00
+Interest Charged $5.00
+New Balance Total $423.00
+Transactions
+Transaction Posting Description Reference Account Amount Total
+Date Date Number Number
+Payments and Other Credits
+12/15 12/15 SAMPLE PAYMENT THANK YOU 1001 0000 -200.00
+TOTAL PAYMENTS AND OTHER CREDITS FOR THIS PERIOD -$200.00
+Purchases and Adjustments
+12/18 12/19 SAMPLE GROCERY MARKET 1002 0000 75.00
+01/03 01/04 SAMPLE CAFE 1003 0000 50.00
+01/05 01/06 SAMPLE MERCHANT RETURN 1004 0000 -10.00
+TOTAL PURCHASES AND ADJUSTMENTS FOR THIS PERIOD $115.00
+Fees Charged
+01/07 01/07 SAMPLE SERVICE FEE 3.00
+TOTAL FEES CHARGED FOR THIS PERIOD $3.00
+Interest Charged
+01/07 01/07 INTEREST CHARGED ON PURCHASES 5.00
+TOTAL INTEREST CHARGED FOR THIS PERIOD $5.00

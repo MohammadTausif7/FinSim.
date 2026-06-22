@@ -1,0 +1,2 @@
+[console_scripts]
+finsim-parse = finsim_parser.cli:main

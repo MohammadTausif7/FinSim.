@@ -10,6 +10,16 @@ npm-debug.log*
 vite.config.js
 vite.config.d.ts
 
+# Python document intelligence workspace
+__pycache__/
+*.py[cod]
+.venv/
+.coverage
+document_intelligence/input/
+document_intelligence/output/
+document_intelligence/data/private/
+*.egg-info/
+
 # Keep local project notes out of the shared repository.
 README.md
 CONTRIBUTING.md

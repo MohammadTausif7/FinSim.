@@ -1,0 +1,11 @@
+MidFirst Bank
+Sooner Student Checking
+This Statement: January 31, 2026
+Beginning Balance: $1,000.00
+Date Description Additions Subtractions Balance
+01/05 SAMPLE EMPLOYER DEPOSIT 500.00 1,500.00
+PAYROLL REFERENCE 10001
+01/08 SAMPLE GROCERY MARKET 100.00 1,400.00
+STORE 0042
+01/12 SAMPLE ELECTRIC UTILITY 50.00 1,350.00
+Ending Balance: $1,350.00

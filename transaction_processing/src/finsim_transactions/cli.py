@@ -10,7 +10,7 @@ from pathlib import Path
 from .contracts import ContractError
 from .csv_io import write_processed
 from .processor import process_files
-from .rules import RAW_CATEGORY_MAP, TYPE_CATEGORIES, load_rulebook
+from .rules import available_categories, load_rulebook
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,13 +34,12 @@ def main() -> int:
     try:
         if args.command == "categories":
             rulebook = load_rulebook()
-            categories = {str(rule["category"]) for rule in rulebook.category_rules}
-            categories.update(RAW_CATEGORY_MAP.values())
-            categories.update(category for category, _ in TYPE_CATEGORIES.values())
-            categories.update({"Credits", "Refunds", "Other"})
             print(
                 json.dumps(
-                    {"rulebook_version": rulebook.version, "categories": sorted(categories)},
+                    {
+                        "rulebook_version": rulebook.version,
+                        "categories": sorted(available_categories(rulebook)),
+                    },
                     indent=2,
                 )
             )

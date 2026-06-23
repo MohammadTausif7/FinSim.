@@ -5,12 +5,13 @@ from __future__ import annotations
 from collections import Counter
 from decimal import Decimal
 from pathlib import Path
+from typing import Mapping
 
-from .cleaning import clean_merchant
+from .cleaning import clean_merchant, normalize_description
 from .contracts import ContractError
 from .csv_io import read_transactions
-from .models import ProcessedTransaction, QualityReport, SourceTransaction
-from .rules import Rulebook, load_rulebook
+from .models import CategoryDecision, ProcessedTransaction, QualityReport, SourceTransaction
+from .rules import Rulebook, canonical_category, load_rulebook
 
 
 REVIEW_THRESHOLD = Decimal("0.70")
@@ -20,10 +21,12 @@ EXTRACTION_REVIEW_THRESHOLD = Decimal("0.75")
 def process_files(
     input_paths: list[Path],
     rulebook_path: Path | None = None,
+    merchant_rules: Mapping[str, str] | None = None,
 ) -> tuple[list[ProcessedTransaction], QualityReport]:
     if not input_paths:
         raise ValueError("At least one input CSV is required")
     rulebook = load_rulebook(rulebook_path)
+    learned_rules = _validate_merchant_rules(merchant_rules or {}, rulebook)
     report = QualityReport(rulebook_version=rulebook.version, input_files=len(input_paths))
     unique: list[SourceTransaction] = []
     seen: dict[str, SourceTransaction] = {}
@@ -43,8 +46,18 @@ def process_files(
                 )
             report.duplicates_removed += 1
 
-    processed = [_process_transaction(row, rulebook) for row in unique]
+    processed = [_process_transaction(row, rulebook, learned_rules) for row in unique]
     processed.sort(key=lambda row: (row.source.posted_at, row.source.transaction_id))
+    update_quality_report(processed, report)
+    return processed, report
+
+
+def update_quality_report(
+    processed: list[ProcessedTransaction],
+    report: QualityReport,
+) -> QualityReport:
+    """Refresh every metric that can change after category review."""
+
     report.output_rows = len(processed)
     report.categorized_rows = sum(row.category != "Other" for row in processed)
     report.review_rows = sum(row.needs_review for row in processed)
@@ -67,21 +80,43 @@ def process_files(
             continue
         category_spend[row.category] = category_spend.get(row.category, Decimal("0.00")) - row.source.amount
     report.category_spend = category_spend
+    report.warnings = [
+        warning
+        for warning in report.warnings
+        if not warning.endswith("transactions need category review before analytics.")
+    ]
     if report.review_rows:
         report.warnings.append(
             f"{report.review_rows} transactions need category review before analytics."
         )
-    return processed, report
+    return report
 
 
-def _process_transaction(transaction: SourceTransaction, rulebook: Rulebook) -> ProcessedTransaction:
+def non_category_review_required(transaction: SourceTransaction) -> bool:
+    """Keep data-quality concerns open after a person confirms the category."""
+
+    return (
+        transaction.extraction_confidence < EXTRACTION_REVIEW_THRESHOLD
+        or transaction.amount == 0
+    )
+
+
+def _process_transaction(
+    transaction: SourceTransaction,
+    rulebook: Rulebook,
+    merchant_rules: Mapping[str, str],
+) -> ProcessedTransaction:
     merchant = clean_merchant(transaction.description_raw, rulebook.aliases)
-    decision = rulebook.categorize(transaction, merchant)
+    remembered_category = merchant_rules.get(normalize_description(merchant))
+    decision = (
+        CategoryDecision(remembered_category, "user_merchant", Decimal("1.00"))
+        if remembered_category
+        else rulebook.categorize(transaction, merchant)
+    )
     needs_review = (
         decision.confidence < REVIEW_THRESHOLD
         or decision.category == "Other"
-        or transaction.extraction_confidence < EXTRACTION_REVIEW_THRESHOLD
-        or transaction.amount == 0
+        or non_category_review_required(transaction)
     )
     return ProcessedTransaction(
         source=transaction,
@@ -91,3 +126,19 @@ def _process_transaction(transaction: SourceTransaction, rulebook: Rulebook) -> 
         category_confidence=decision.confidence,
         needs_review=needs_review,
     )
+
+
+def _validate_merchant_rules(
+    merchant_rules: Mapping[str, str],
+    rulebook: Rulebook,
+) -> dict[str, str]:
+    validated: dict[str, str] = {}
+    for merchant, category in merchant_rules.items():
+        merchant_key = normalize_description(str(merchant))
+        matched_category = canonical_category(str(category), rulebook)
+        if not merchant_key:
+            raise ValueError("A remembered merchant cannot be empty")
+        if matched_category is None:
+            raise ValueError(f"Remembered merchant {merchant!r} has an unknown category")
+        validated[merchant_key] = matched_category
+    return validated

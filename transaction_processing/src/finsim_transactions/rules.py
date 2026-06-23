@@ -31,6 +31,8 @@ TYPE_CATEGORIES = {
     "transfer": ("Transfers", "0.95"),
 }
 
+FALLBACK_CATEGORIES = {"Credits", "Refunds", "Other"}
+
 
 @dataclass(frozen=True, slots=True)
 class Rulebook:
@@ -87,6 +89,26 @@ def load_rulebook(path: Path | None = None) -> Rulebook:
             data.get("category_rules", []),
             key=lambda rule: int(rule.get("priority", 1000)),
         ),
+    )
+
+
+def available_categories(rulebook: Rulebook) -> set[str]:
+    """Return every category that the active rulebook can produce."""
+
+    categories = {str(rule["category"]) for rule in rulebook.category_rules}
+    categories.update(RAW_CATEGORY_MAP.values())
+    categories.update(category for category, _ in TYPE_CATEGORIES.values())
+    categories.update(FALLBACK_CATEGORIES)
+    return categories
+
+
+def canonical_category(value: str, rulebook: Rulebook) -> str | None:
+    """Match a user choice without making category spelling case sensitive."""
+
+    requested = " ".join(value.split()).casefold()
+    return next(
+        (category for category in available_categories(rulebook) if category.casefold() == requested),
+        None,
     )
 
 

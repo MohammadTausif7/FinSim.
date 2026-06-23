@@ -58,7 +58,7 @@ class ProcessedTransaction:
     category_source: str
     category_confidence: Decimal
     needs_review: bool
-    processing_version: str = "0.1.0"
+    processing_version: str = "0.2.0"
 
     def as_csv_row(self) -> dict[str, str]:
         source = self.source

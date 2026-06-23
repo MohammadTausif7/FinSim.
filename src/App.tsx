@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import StatementProcessingWorkspace from './features/statements/StatementProcessingWorkspace'
 import {
   ArrowDownRight,
   ArrowRight,
@@ -284,10 +285,7 @@ function Forecast() {
 function ForecastSlider({label,value,min,max,setValue}:{label:string;value:number;min:number;max:number;setValue:(n:number)=>void}) {return <label className="forecast-slider"><span><strong>{label}</strong><b>${value.toLocaleString()}</b></span><input type="range" min={min} max={max} value={value} onChange={e=>setValue(Number(e.target.value))}/><small><span>${min.toLocaleString()}</span><span>${max.toLocaleString()}</span></small></label>}
 
 function Statements() {
-  const [uploaded, setUploaded] = useState(false)
-  // No file leaves the browser in this increment. The button demonstrates the
-  // success state that the secure upload API will trigger in Increment 2.
-  return <><PageHeader eyebrow="DATA WORKSPACE" title="Your statements."><button className="button button-primary button-compact" onClick={()=>setUploaded(true)}><Upload size={16}/> Preview upload</button></PageHeader><div className="upload-panel panel"><div className="upload-icon"><Upload/></div><h2>{uploaded?'Sample statement ready to review':'Preview the statement workflow.'}</h2><p>{uploaded?'The preview state is complete. Increment 2 will connect it to the secure parsing pipeline.':'The completed product will use at least three consecutive monthly PDF statements to build the first financial picture.'}</p><button className="button button-primary" onClick={()=>setUploaded(true)}>{uploaded?<><Check/> Sample added</>:<>Try the upload preview <ArrowRight/></>}</button><small>Preview only · No file is selected or transmitted</small></div><div className="statement-grid">{['April 2026','May 2026','June 2026'].map((m,i)=><article className="panel statement-item" key={m}><span className="pdf-icon"><FileText/></span><div><strong>{m} sample</strong><small>Sample checking account · Preview status</small></div><span className={i===2?'status processing':'status'}>{i===2?'Demo':'Sample'}</span><MoreHorizontal/></article>)}</div><div className="privacy-note"><LockKeyhole/><div><strong>No financial files are handled in this preview.</strong><p>Secure uploads, retention rules and data deletion will be implemented in Increment 2.</p></div></div></>
+  return <StatementProcessingWorkspace />
 }
 
 function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {

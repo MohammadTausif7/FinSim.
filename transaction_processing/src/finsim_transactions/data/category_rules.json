@@ -1,0 +1,104 @@
+{
+  "version": "0.1.0",
+  "merchant_aliases": [
+    {"merchant": "Amazon", "keywords": ["AMAZON", "AMZN"]},
+    {"merchant": "CVS Pharmacy", "keywords": ["CVS/PHARMACY", "CVS PHARMACY"]},
+    {"merchant": "Netflix", "keywords": ["NETFLIX"]},
+    {"merchant": "Starbucks", "keywords": ["STARBUCKS"]},
+    {"merchant": "Uber Eats", "keywords": ["UBER EATS", "UBER *EATS"]},
+    {"merchant": "Whole Foods Market", "keywords": ["WHOLE FOODS"]}
+  ],
+  "category_rules": [
+    {
+      "category": "Income",
+      "priority": 10,
+      "confidence": 0.98,
+      "transaction_types": ["credit"],
+      "keywords": ["PAYROLL", "SALARY", "DIRECT DEPOSIT", "EMPLOYER DEPOSIT"]
+    },
+    {
+      "category": "Dining",
+      "priority": 20,
+      "confidence": 0.92,
+      "keywords": ["RESTAURANT", "CAFE", "COFFEE", "STARBUCKS", "DOORDASH", "UBER EATS", "MCDONALD"]
+    },
+    {
+      "category": "Subscriptions",
+      "priority": 30,
+      "confidence": 0.95,
+      "keywords": ["NETFLIX", "SPOTIFY", "HULU", "DISNEY PLUS", "APPLE.COM/BILL", "SUBSCRIPTION"]
+    },
+    {
+      "category": "Groceries",
+      "priority": 40,
+      "confidence": 0.90,
+      "keywords": ["GROCERY", "SUPERMARKET", "WHOLE FOODS", "TRADER JOE", "KROGER", "ALDI"]
+    },
+    {
+      "category": "Healthcare",
+      "priority": 50,
+      "confidence": 0.90,
+      "keywords": ["PHARMACY", "WALGREENS", "CVS", "HOSPITAL", "CLINIC", "DENTAL", "MEDICAL"]
+    },
+    {
+      "category": "Transport",
+      "priority": 60,
+      "confidence": 0.88,
+      "keywords": ["UBER", "LYFT", "GAS", "SHELL", "EXXON", "CHEVRON", "PARKING", "TRANSIT"]
+    },
+    {
+      "category": "Utilities",
+      "priority": 70,
+      "confidence": 0.90,
+      "keywords": ["ELECTRIC", "WATER", "UTILITY", "COMCAST", "INTERNET", "VERIZON", "T-MOBILE", "AT&T"]
+    },
+    {
+      "category": "Housing",
+      "priority": 80,
+      "confidence": 0.92,
+      "keywords": ["RENT", "MORTGAGE", "HOME IMPROVEMENT", "PROPERTY MANAGEMENT"]
+    },
+    {
+      "category": "Travel",
+      "priority": 90,
+      "confidence": 0.88,
+      "keywords": ["AIRLINES", "AIRWAYS", "HOTEL", "AIRBNB", "BOOKING.COM", "CAR RENTAL"]
+    },
+    {
+      "category": "Education",
+      "priority": 100,
+      "confidence": 0.88,
+      "keywords": ["UNIVERSITY", "COLLEGE", "TUITION", "UDEMY", "COURSERA", "BOOKSTORE"]
+    },
+    {
+      "category": "Insurance",
+      "priority": 110,
+      "confidence": 0.90,
+      "keywords": ["INSURANCE", "GEICO", "PROGRESSIVE", "STATE FARM"]
+    },
+    {
+      "category": "Entertainment",
+      "priority": 120,
+      "confidence": 0.85,
+      "keywords": ["CINEMA", "THEATRE", "MOVIE", "TICKETMASTER", "STEAM GAMES"]
+    },
+    {
+      "category": "Shopping",
+      "priority": 130,
+      "confidence": 0.82,
+      "keywords": ["AMAZON", "AMZN", "TARGET", "WALMART", "SHEIN", "GAP.COM", "DEPARTMENT STORE"]
+    },
+    {
+      "category": "Charity",
+      "priority": 140,
+      "confidence": 0.85,
+      "keywords": ["DONATION", "CHARITY", "RED CROSS"]
+    },
+    {
+      "category": "Services",
+      "priority": 150,
+      "confidence": 0.75,
+      "keywords": ["SERVICE", "SALON", "CLEANING", "REPAIR"]
+    }
+  ]
+}

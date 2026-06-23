@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "finsim-transaction-processing"
+version = "0.1.0"
+description = "Transaction cleaning, categorization, and quality reporting for FinSim"
+requires-python = ">=3.11"
+
+[project.scripts]
+finsim-transform = "finsim_transactions.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+finsim_transactions = ["data/*.json"]

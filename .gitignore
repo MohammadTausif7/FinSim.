@@ -18,6 +18,9 @@ __pycache__/
 document_intelligence/input/
 document_intelligence/output/
 document_intelligence/data/private/
+transaction_processing/input/
+transaction_processing/output/
+transaction_processing/data/private/
 *.egg-info/
 
 # Keep local project notes out of the shared repository.

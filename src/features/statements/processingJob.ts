@@ -9,6 +9,8 @@ export type StatementFile = {
 
 export type ReviewItem = {
   id: string
+  transactionIds?: string[]
+  occurrenceCount?: number
   merchant: string
   description: string
   postedAt: string
@@ -41,6 +43,8 @@ export const sampleStatements: StatementFile[] = [
 export const sampleReviewItems: ReviewItem[] = [
   {
     id: 'review-1',
+    transactionIds: ['review-1'],
+    occurrenceCount: 1,
     merchant: 'Northstar Market',
     description: 'NORTHSTAR MKTPLACE 0421',
     postedAt: 'June 7, 2026',
@@ -50,6 +54,8 @@ export const sampleReviewItems: ReviewItem[] = [
   },
   {
     id: 'review-2',
+    transactionIds: ['review-2'],
+    occurrenceCount: 1,
     merchant: 'Riverfront Services',
     description: 'RIVERFRONT SVCS MONTHLY',
     postedAt: 'June 12, 2026',
@@ -59,6 +65,8 @@ export const sampleReviewItems: ReviewItem[] = [
   },
   {
     id: 'review-3',
+    transactionIds: ['review-3'],
+    occurrenceCount: 1,
     merchant: 'Corner House',
     description: 'CORNER HOUSE POS 7782',
     postedAt: 'June 18, 2026',

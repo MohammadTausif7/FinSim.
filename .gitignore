@@ -21,6 +21,9 @@ document_intelligence/data/private/
 transaction_processing/input/
 transaction_processing/output/
 transaction_processing/data/private/
+processing_api/input/
+processing_api/output/
+processing_api/data/private/
 *.egg-info/
 
 # Keep local project notes out of the shared repository.

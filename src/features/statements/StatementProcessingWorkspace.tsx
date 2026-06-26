@@ -26,6 +26,15 @@ import {
   type ReviewItem,
   type StatementFile,
 } from './processingJob'
+import {
+  createProcessingJob,
+  deleteProcessingJob,
+  getProcessingJob,
+  getProcessingResult,
+  getReviewItems,
+  submitFeedback,
+  type ApiReviewItem,
+} from './processingApi'
 
 function toStatementFiles(files: File[]) {
   return files.map((file, index): StatementFile => ({
@@ -36,9 +45,31 @@ function toStatementFiles(files: File[]) {
   }))
 }
 
+function toReviewItem(item: ApiReviewItem): ReviewItem {
+  return {
+    id: item.id,
+    transactionIds: item.transaction_ids,
+    occurrenceCount: item.occurrence_count,
+    merchant: item.merchant,
+    description: item.description,
+    postedAt: new Date(`${item.posted_at}T00:00:00`).toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    }),
+    amount: `$${Number(item.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+    confidence: item.confidence,
+    suggestions: item.suggestions,
+  }
+}
+
 export default function StatementProcessingWorkspace() {
   const inputRef = useRef<HTMLInputElement>(null)
+  const jobIdRef = useRef<string | null>(null)
   const [files, setFiles] = useState<StatementFile[]>([])
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [sampleMode, setSampleMode] = useState(false)
+  const [jobId, setJobId] = useState<string | null>(null)
   const [jobState, setJobState] = useState<JobState>('idle')
   const [stageIndex, setStageIndex] = useState(0)
   const [error, setError] = useState('')
@@ -46,6 +77,8 @@ export default function StatementProcessingWorkspace() {
   const [activeReview, setActiveReview] = useState(0)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [rememberMerchant, setRememberMerchant] = useState(true)
+  const [availableCategories, setAvailableCategories] = useState(allCategories)
+  const [completion, setCompletion] = useState({ cleaned: 0, confirmed: 0, warnings: 0 })
 
   const unresolved = useMemo(
     () => reviewItems.filter((item) => !item.resolvedCategory),
@@ -55,7 +88,15 @@ export default function StatementProcessingWorkspace() {
   const currentReview = unresolved[activeReview] || unresolved[0]
 
   useEffect(() => {
-    if (jobState !== 'processing') return
+    jobIdRef.current = jobId
+  }, [jobId])
+
+  useEffect(() => () => {
+    if (jobIdRef.current) void deleteProcessingJob(jobIdRef.current).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    if (jobState !== 'processing' || !sampleMode) return
     const timer = window.setTimeout(() => {
       if (stageIndex < processingStages.length - 1) {
         setStageIndex((current) => current + 1)
@@ -66,7 +107,59 @@ export default function StatementProcessingWorkspace() {
       setReviewOpen(true)
     }, 720)
     return () => window.clearTimeout(timer)
-  }, [jobState, stageIndex])
+  }, [jobState, sampleMode, stageIndex])
+
+  useEffect(() => {
+    if (jobState !== 'processing' || sampleMode || !jobId) return
+    let cancelled = false
+    let timer = 0
+
+    async function poll() {
+      try {
+        const job = await getProcessingJob(jobId as string)
+        if (cancelled) return
+        const nextStage = processingStages.findIndex((stage) => stage.id === job.stage)
+        if (nextStage >= 0) setStageIndex(nextStage)
+        if (job.status === 'error') {
+          setError(job.error || 'The statement job could not be completed.')
+          setJobState('idle')
+          return
+        }
+        if (job.status === 'review') {
+          const review = await getReviewItems(job.job_id)
+          if (cancelled) return
+          setReviewItems(review.items.map(toReviewItem))
+          setAvailableCategories(review.categories)
+          setActiveReview(0)
+          setJobState('review')
+          setReviewOpen(true)
+          return
+        }
+        if (job.status === 'complete') {
+          const result = await getProcessingResult(job.job_id)
+          if (cancelled) return
+          setCompletion({
+            cleaned: result.quality_report.output_rows,
+            confirmed: result.reviewed_merchant_count,
+            warnings: result.quality_report.warnings.length,
+          })
+          setJobState('finalizing')
+          return
+        }
+        timer = window.setTimeout(poll, 650)
+      } catch (caught) {
+        if (cancelled) return
+        setError(caught instanceof Error ? caught.message : 'The processing service stopped responding.')
+        setJobState('idle')
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [jobId, jobState, sampleMode])
 
   useEffect(() => {
     if (jobState !== 'finalizing') return
@@ -93,12 +186,20 @@ export default function StatementProcessingWorkspace() {
       setError('Each statement must be 25 MB or smaller.')
       return
     }
-    setFiles(toStatementFiles(pdfs.slice(0, 12)))
+    if (pdfs.length > 12) {
+      setError('Add no more than 12 monthly statements at one time.')
+      return
+    }
+    if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
+    setFiles(toStatementFiles(pdfs))
+    setSelectedFiles(pdfs)
+    setSampleMode(false)
+    setJobId(null)
     setError('')
     setJobState('idle')
   }
 
-  function startProcessing() {
+  async function startProcessing() {
     if (files.length < minimumStatementCount) {
       setError(`Add at least ${minimumStatementCount} monthly statements to build the first financial picture.`)
       return
@@ -107,12 +208,42 @@ export default function StatementProcessingWorkspace() {
     setStageIndex(0)
     setError('')
     setJobState('processing')
+    if (sampleMode) return
+    try {
+      if (jobId) await deleteProcessingJob(jobId)
+      const job = await createProcessingJob(selectedFiles)
+      setJobId(job.job_id)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The statements could not be uploaded.')
+      setJobState('idle')
+    }
   }
 
-  function resolveReview(category: string) {
+  async function resolveReview(category: string) {
     if (!currentReview) return
     const currentId = currentReview.id
     const remainingAfterDecision = unresolved.length - 1
+    if (!sampleMode && jobId) {
+      try {
+        const job = await submitFeedback(jobId, [{
+          transaction_ids: currentReview.transactionIds || [currentId],
+          category,
+          remember_merchant: rememberMerchant,
+        }])
+        if (remainingAfterDecision === 0 && job.status === 'complete') {
+          const result = await getProcessingResult(jobId)
+          setCompletion({
+            cleaned: result.quality_report.output_rows,
+            confirmed: result.reviewed_merchant_count,
+            warnings: result.quality_report.warnings.length,
+          })
+        }
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'The category choice could not be saved.')
+        setReviewOpen(false)
+        return
+      }
+    }
     setReviewItems((items) => items.map((item) => (
       item.id === currentId
         ? { ...item, resolvedCategory: category, rememberMerchant }
@@ -127,12 +258,26 @@ export default function StatementProcessingWorkspace() {
   }
 
   function resetWorkspace() {
+    if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
     if (inputRef.current) inputRef.current.value = ''
     setFiles([])
+    setSelectedFiles([])
+    setSampleMode(false)
+    setJobId(null)
     setReviewItems(sampleReviewItems)
     setStageIndex(0)
     setError('')
     setReviewOpen(false)
+    setJobState('idle')
+  }
+
+  function useSafeSamples() {
+    if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
+    setFiles(sampleStatements)
+    setSelectedFiles([])
+    setSampleMode(true)
+    setJobId(null)
+    setError('')
     setJobState('idle')
   }
 
@@ -154,7 +299,7 @@ export default function StatementProcessingWorkspace() {
       <article className="panel upload-workspace">
         <div className="workspace-heading">
           <span className="workspace-icon"><Upload /></span>
-          <div><span className="overline">MONTHLY STATEMENTS</span><h2>Add at least three consecutive months</h2><p>The statement periods are confirmed after parsing. Files remain in this browser preview and are not transmitted.</p></div>
+          <div><span className="overline">MONTHLY STATEMENTS</span><h2>Add at least three consecutive months</h2><p>Statement periods are confirmed after parsing. Selected PDFs are sent only to the local FinSim processing service.</p></div>
         </div>
 
         <input
@@ -172,7 +317,7 @@ export default function StatementProcessingWorkspace() {
           <span>Three files minimum for a first financial picture</span>
           <div>
             <button className="button button-primary" onClick={() => inputRef.current?.click()}>Choose PDFs</button>
-            <button className="button button-secondary" onClick={() => { setFiles(sampleStatements); setError('') }}>Use safe sample files</button>
+            <button className="button button-secondary" onClick={useSafeSamples}>Use safe sample files</button>
           </div>
         </div> : <div className="selected-statements">
           <div className="selected-summary"><strong>{files.length} statements selected</strong><button onClick={() => inputRef.current?.click()}>Replace files</button></div>
@@ -197,16 +342,16 @@ export default function StatementProcessingWorkspace() {
         </div>
         <div className="processing-copy">
           <span className="overline">PROCESSING JOB</span>
-          <h2>{jobState === 'idle' && 'Waiting for statements'}{jobState === 'processing' && processingStages[stageIndex].label}{jobState === 'review' && `${unresolved.length} ${unresolved.length === 1 ? 'transaction needs' : 'transactions need'} your help`}{jobState === 'finalizing' && 'Applying your choices'}{jobState === 'complete' && 'Your financial picture is ready'}</h2>
-          <p>{jobState === 'idle' && 'Choose files to preview the connected parsing and categorization flow.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim paused before using uncertain categories in your analytics.'}{jobState === 'finalizing' && 'Category totals and quality checks are being refreshed.'}{jobState === 'complete' && 'Every uncertain sample transaction has a confirmed category.'}</p>
-          {jobState === 'review' && <button className="button button-primary button-compact" onClick={() => setReviewOpen(true)}>Review transactions <ArrowRight /></button>}
-          {jobState === 'complete' && <div className="completion-summary"><span><Check /> 103 cleaned</span><span><Check /> 3 user confirmed</span><span><ShieldCheck /> Quality checks passed</span></div>}
+          <h2>{jobState === 'idle' && 'Waiting for statements'}{jobState === 'processing' && processingStages[stageIndex].label}{jobState === 'review' && `${unresolved.length} ${unresolved.length === 1 ? 'transaction needs' : 'transactions need'} your help`}{jobState === 'finalizing' && 'Applying your choices'}{jobState === 'complete' && 'Your categorized data is ready'}</h2>
+          <p>{jobState === 'idle' && 'Choose files to start the parsing and categorization flow.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim paused before using uncertain categories in your analytics.'}{jobState === 'finalizing' && 'Category totals and quality checks are being refreshed.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'The cleaned results are ready for the analytics integration.')}</p>
+          {jobState === 'review' && <button className="button button-primary button-compact" onClick={() => setReviewOpen(true)}>Review merchants <ArrowRight /></button>}
+          {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
         </div>
       </article>
     </section>
 
     <section className="panel job-stage-panel">
-      <div className="panel-head"><div><span className="overline">LIVE PIPELINE</span><h2>From PDFs to categorized data</h2></div><span className="integration-badge">Frontend integration preview</span></div>
+      <div className="panel-head"><div><span className="overline">LIVE PIPELINE</span><h2>From PDFs to categorized data</h2></div><span className="integration-badge">{sampleMode ? 'Safe sample preview' : jobId ? 'Local API connected' : 'Processing API ready'}</span></div>
       <div className="job-stages">{processingStages.map((stage, index) => {
         const done = jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' || (jobState === 'processing' && index < stageIndex)
         const active = jobState === 'processing' && index === stageIndex
@@ -217,31 +362,31 @@ export default function StatementProcessingWorkspace() {
       })}</div>
     </section>
 
-    <div className="privacy-note panel"><LockKeyhole/><div><strong>Private by design.</strong><p>This commit demonstrates the complete interaction using safe browser state. The processing API can replace the local job controller without changing the review experience.</p></div></div>
+    <div className="privacy-note panel"><LockKeyhole/><div><strong>Private by design.</strong><p>{sampleMode || files.length === 0 ? 'Safe sample files stay in browser memory.' : 'The local processing service removes temporary PDF copies as soon as parsing finishes.'} Account ownership and retention controls are the next security milestone.</p></div></div>
 
     {reviewOpen && currentReview && <div className="review-backdrop" role="presentation">
       <section className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title">
         <div className="review-dialog-head">
-          <div><span className="overline">NEEDS YOUR INPUT</span><h2 id="review-title">What was this transaction for?</h2></div>
+          <div><span className="overline">NEEDS YOUR INPUT</span><h2 id="review-title">{(currentReview.occurrenceCount || 1) > 1 ? 'What were these transactions for?' : 'What was this transaction for?'}</h2></div>
           <button autoFocus onClick={() => setReviewOpen(false)} aria-label="Review later"><X /></button>
         </div>
         <div className="review-progress"><div><i style={{ width: `${(resolvedCount / reviewItems.length) * 100}%` }}/></div><span>{resolvedCount} of {reviewItems.length} reviewed</span></div>
         <div className="review-transaction">
           <span>{currentReview.merchant.slice(0, 2).toUpperCase()}</span>
-          <div><strong>{currentReview.merchant}</strong><small>{currentReview.description}</small><em>{currentReview.postedAt}</em></div>
+          <div><strong>{currentReview.merchant}</strong><small>{(currentReview.occurrenceCount || 1) > 1 ? `${currentReview.occurrenceCount} matching transactions · ${currentReview.description}` : currentReview.description}</small><em>{currentReview.postedAt}</em></div>
           <b>{currentReview.amount}</b>
         </div>
         <div className="confidence-warning"><Sparkles/><div><strong>Low confidence: {currentReview.confidence}%</strong><p>No bank category or strong merchant rule matched this description.</p></div></div>
         <fieldset className="category-choices">
           <legend>Choose the best category</legend>
           <div>{currentReview.suggestions.map((category) => <button key={category} onClick={() => resolveReview(category)}>{category}<ArrowRight /></button>)}</div>
-          <select aria-label="Choose another category" defaultValue="" onChange={(event) => event.target.value && resolveReview(event.target.value)}>
+          <select key={currentReview.id} aria-label="Choose another category" defaultValue="" onChange={(event) => event.target.value && resolveReview(event.target.value)}>
             <option value="" disabled>Choose another category</option>
-            {allCategories.filter((category) => !currentReview.suggestions.includes(category)).map((category) => <option key={category}>{category}</option>)}
+            {availableCategories.filter((category) => !currentReview.suggestions.includes(category)).map((category) => <option key={category}>{category}</option>)}
           </select>
         </fieldset>
         <label className="remember-choice"><input type="checkbox" checked={rememberMerchant} onChange={(event) => setRememberMerchant(event.target.checked)}/><span><strong>Remember this merchant</strong><small>Use the same category for future matching transactions.</small></span></label>
-        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>Your choice is stored only in this preview.</span></div>
+        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only in this preview.' : 'Your choice is applied to this temporary processing job.'}</span></div>
       </section>
     </div>}
   </>

@@ -55,7 +55,7 @@ class Rulebook:
             allowed_types = {str(value) for value in rule.get("transaction_types", [])}
             if allowed_types and transaction.transaction_type not in allowed_types:
                 continue
-            keywords = [str(value).upper() for value in rule.get("keywords", [])]
+            keywords = [normalize_description(str(value)) for value in rule.get("keywords", [])]
             if keywords and any(keyword in searchable for keyword in keywords):
                 return CategoryDecision(
                     str(rule["category"]),

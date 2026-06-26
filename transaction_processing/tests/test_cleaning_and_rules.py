@@ -55,6 +55,49 @@ class CleaningAndRuleTests(unittest.TestCase):
         self.assertEqual(decision.category, "Credits")
         self.assertEqual(decision.confidence, Decimal("0.40"))
 
+    def test_common_statement_merchants_use_clean_names_and_categories(self) -> None:
+        rulebook = load_rulebook()
+        cases = [
+            ("WAL-MART #0123 OKLAHOMA CITY OK", "Walmart", "Shopping"),
+            ("COSTCO WHSE #1205", "Costco", "Groceries"),
+            ("EXPEDIA 729184", "Expedia", "Travel"),
+            ("LYFT *RIDE FRI", "Lyft", "Transport"),
+            ("BRAUMS STORE 42", "Braum's", "Dining"),
+            ("IC INSTACART INSTACART CA", "Instacart", "Groceries"),
+            ("COX OKLAHOMA COMM SV", "Cox Communications", "Utilities"),
+            ("NNT BESTBUY MKTPL", "Best Buy", "Shopping"),
+            ("OPENAI CHATGPT SUBSCR", "ChatGPT", "Subscriptions"),
+            ("TACO BELL NORMAN OK", "Taco Bell", "Dining"),
+            ("MINT MOBILE 800 683", "Mint Mobile", "Utilities"),
+            ("EBAY O 09", "eBay", "Shopping"),
+            ("TURKISH AIRL TICKET", "Turkish Airlines", "Travel"),
+        ]
+        for description, expected_merchant, expected_category in cases:
+            with self.subTest(description=description):
+                transaction = sample_transaction(description_raw=description)
+                merchant = clean_merchant(description, rulebook.aliases)
+                decision = rulebook.categorize(transaction, merchant)
+                self.assertEqual(merchant, expected_merchant)
+                self.assertEqual(decision.category, expected_category)
+                self.assertGreaterEqual(decision.confidence, Decimal("0.80"))
+
+    def test_zelle_is_a_transfer_for_both_money_directions(self) -> None:
+        rulebook = load_rulebook()
+        for amount, transaction_type in (
+            (Decimal("-45.00"), "debit"),
+            (Decimal("75.00"), "credit"),
+        ):
+            transaction = sample_transaction(
+                description_raw="ZELLE PAYMENT SAMPLE PERSON",
+                amount=amount,
+                transaction_type=transaction_type,
+            )
+            merchant = clean_merchant(transaction.description_raw, rulebook.aliases)
+            decision = rulebook.categorize(transaction, merchant)
+            self.assertEqual(merchant, "Zelle")
+            self.assertEqual(decision.category, "Transfers")
+            self.assertEqual(decision.source, "rulebook")
+
 
 if __name__ == "__main__":
     unittest.main()

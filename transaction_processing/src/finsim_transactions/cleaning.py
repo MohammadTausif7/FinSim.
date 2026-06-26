@@ -29,7 +29,7 @@ def normalize_description(value: str) -> str:
 def clean_merchant(value: str, aliases: list[dict[str, object]]) -> str:
     normalized = normalize_description(value)
     for alias in aliases:
-        keywords = [str(keyword).upper() for keyword in alias.get("keywords", [])]
+        keywords = [normalize_description(str(keyword)) for keyword in alias.get("keywords", [])]
         if any(keyword in normalized for keyword in keywords):
             return str(alias["merchant"])
 

@@ -1,0 +1,131 @@
+{
+  "version": "0.2.0",
+  "merchant_aliases": [
+    {"merchant": "Amazon", "keywords": ["AMAZON", "AMZN"]},
+    {"merchant": "Account transfer", "keywords": ["PHONE/ONLINE TRANSF", "PHONE ONLINE TRANSF", "TRANSFER TO ACC", "TRANSFER FR ACC"]},
+    {"merchant": "Back Market", "keywords": ["BACK MARKET"]},
+    {"merchant": "Best Buy", "keywords": ["BEST BUY", "BESTBUY"]},
+    {"merchant": "Braum's", "keywords": ["BRAUM'S", "BRAUMS", "BRAUM S"]},
+    {"merchant": "ChatGPT", "keywords": ["OPENAI CHATGPT", "CHATGPT SUBSCR", "OPENAI"]},
+    {"merchant": "Chowrastha", "keywords": ["CHOWRASTHA"]},
+    {"merchant": "Costco", "keywords": ["COSTCO", "COSTCO WHSE"]},
+    {"merchant": "Cox Communications", "keywords": ["COX OKLAHOMA", "COX COMM"]},
+    {"merchant": "CVS Pharmacy", "keywords": ["CVS/PHARMACY", "CVS PHARMACY"]},
+    {"merchant": "eBay", "keywords": ["EBAY"]},
+    {"merchant": "Expedia", "keywords": ["EXPEDIA"]},
+    {"merchant": "Great Clips", "keywords": ["GREAT CLIPS"]},
+    {"merchant": "Instacart", "keywords": ["INSTACART"]},
+    {"merchant": "Islamic Society", "keywords": ["ISLAMIC SOCIETY"]},
+    {"merchant": "Lyft", "keywords": ["LYFT"]},
+    {"merchant": "Mint Mobile", "keywords": ["MINT MOBILE"]},
+    {"merchant": "Netflix", "keywords": ["NETFLIX"]},
+    {"merchant": "OG&E", "keywords": ["OG&E", "OGE ONLINE PAY"]},
+    {"merchant": "Starbucks", "keywords": ["STARBUCKS"]},
+    {"merchant": "Taco Bell", "keywords": ["TACO BELL"]},
+    {"merchant": "Turkish Airlines", "keywords": ["TURKISH AIR"]},
+    {"merchant": "Uber Eats", "keywords": ["UBER EATS", "UBER *EATS"]},
+    {"merchant": "University bursar", "keywords": ["BURSAR PURCHASE", "BURSAR PAYMENT"]},
+    {"merchant": "Walmart", "keywords": ["WALMART", "WAL-MART", "WM SUPERCENTER"]},
+    {"merchant": "Zelle", "keywords": ["ZELLE"]},
+    {"merchant": "Whole Foods Market", "keywords": ["WHOLE FOODS"]}
+  ],
+  "category_rules": [
+    {
+      "category": "Income",
+      "priority": 10,
+      "confidence": 0.98,
+      "transaction_types": ["credit"],
+      "keywords": ["PAYROLL", "SALARY", "DIRECT DEPOSIT", "EMPLOYER DEPOSIT"]
+    },
+    {
+      "category": "Transfers",
+      "priority": 15,
+      "confidence": 0.95,
+      "keywords": ["ZELLE", "PHONE/ONLINE TRANSF", "PHONE ONLINE TRANSF", "TRANSFER TO ACC", "TRANSFER FR ACC"]
+    },
+    {
+      "category": "Dining",
+      "priority": 20,
+      "confidence": 0.92,
+      "keywords": ["RESTAURANT", "CAFE", "COFFEE", "STARBUCKS", "DOORDASH", "UBER EATS", "MCDONALD", "BRAUM'S", "BRAUMS", "BRAUM S", "TACO BELL", "CHOWRASTHA"]
+    },
+    {
+      "category": "Subscriptions",
+      "priority": 30,
+      "confidence": 0.95,
+      "keywords": ["NETFLIX", "SPOTIFY", "HULU", "DISNEY PLUS", "APPLE.COM/BILL", "SUBSCRIPTION", "OPENAI", "CHATGPT"]
+    },
+    {
+      "category": "Groceries",
+      "priority": 40,
+      "confidence": 0.90,
+      "keywords": ["GROCERY", "SUPERMARKET", "WHOLE FOODS", "TRADER JOE", "KROGER", "ALDI", "COSTCO", "COSTCO WHSE", "INSTACART"]
+    },
+    {
+      "category": "Healthcare",
+      "priority": 50,
+      "confidence": 0.90,
+      "keywords": ["PHARMACY", "WALGREENS", "CVS", "HOSPITAL", "CLINIC", "DENTAL", "MEDICAL"]
+    },
+    {
+      "category": "Transport",
+      "priority": 60,
+      "confidence": 0.88,
+      "keywords": ["UBER", "LYFT", "GAS", "SHELL", "EXXON", "CHEVRON", "PARKING", "TRANSIT"]
+    },
+    {
+      "category": "Utilities",
+      "priority": 70,
+      "confidence": 0.90,
+      "keywords": ["ELECTRIC", "WATER", "UTILITY", "COMCAST", "INTERNET", "VERIZON", "T-MOBILE", "AT&T", "COX COMM", "COX OKLAHOMA", "OG&E", "OGE ONLINE PAY", "MINT MOBILE"]
+    },
+    {
+      "category": "Housing",
+      "priority": 80,
+      "confidence": 0.92,
+      "keywords": ["RENT", "MORTGAGE", "HOME IMPROVEMENT", "PROPERTY MANAGEMENT"]
+    },
+    {
+      "category": "Travel",
+      "priority": 90,
+      "confidence": 0.88,
+      "keywords": ["AIRLINES", "AIRWAYS", "HOTEL", "AIRBNB", "BOOKING.COM", "CAR RENTAL", "EXPEDIA", "TURKISH AIR"]
+    },
+    {
+      "category": "Education",
+      "priority": 100,
+      "confidence": 0.88,
+      "keywords": ["UNIVERSITY", "COLLEGE", "TUITION", "UDEMY", "COURSERA", "BOOKSTORE", "BURSAR"]
+    },
+    {
+      "category": "Insurance",
+      "priority": 110,
+      "confidence": 0.90,
+      "keywords": ["INSURANCE", "GEICO", "PROGRESSIVE", "STATE FARM"]
+    },
+    {
+      "category": "Entertainment",
+      "priority": 120,
+      "confidence": 0.85,
+      "keywords": ["CINEMA", "THEATRE", "MOVIE", "TICKETMASTER", "STEAM GAMES"]
+    },
+    {
+      "category": "Shopping",
+      "priority": 130,
+      "confidence": 0.82,
+      "keywords": ["AMAZON", "AMZN", "TARGET", "WALMART", "WAL-MART", "WM SUPERCENTER", "SHEIN", "GAP.COM", "DEPARTMENT STORE", "BEST BUY", "BESTBUY", "EBAY", "BACK MARKET"]
+    },
+    {
+      "category": "Charity",
+      "priority": 140,
+      "confidence": 0.85,
+      "keywords": ["DONATION", "CHARITY", "RED CROSS", "ISLAMIC SOCIETY"]
+    },
+    {
+      "category": "Services",
+      "priority": 150,
+      "confidence": 0.75,
+      "keywords": ["SERVICE", "SALON", "CLEANING", "REPAIR", "GREAT CLIPS"]
+    }
+  ]
+}

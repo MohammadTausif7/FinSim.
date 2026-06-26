@@ -1,0 +1,9 @@
+transaction_id,posted_at,description_raw,amount,currency,transaction_type,balance,category_raw,source_statement_id,page_number,extraction_method,extraction_confidence,pipeline_version
+tx-payroll,2026-01-02,SAMPLE EMPLOYER PAYROLL,2500.00,USD,credit,3500.00,,statement-a,1,text,1.00,0.1.0
+tx-grocery,2026-01-03,POS WHOLE FOODS STORE 123456,-82.45,USD,debit,3417.55,,statement-a,1,text,1.00,0.1.0
+tx-coffee,2026-01-04,STARBUCKS REF#ABCD1234 OK,-6.25,USD,debit,3411.30,,statement-a,1,text,1.00,0.1.0
+tx-streaming,2026-01-05,RECURRING NETFLIX.COM,-15.49,USD,debit,3395.81,,statement-a,1,text,1.00,0.1.0
+tx-fee,2026-01-06,SAMPLE SERVICE FEE,-5.00,USD,fee,3390.81,,statement-a,1,text,1.00,0.1.0
+tx-unknown,2026-01-07,LOCAL VENDOR,-20.00,USD,debit,3370.81,,statement-a,1,text,1.00,0.1.0
+tx-travel,2026-01-08,SAMPLE RESERVATION,-100.00,USD,debit,3270.81,Travel/Entertainment,statement-a,1,text,1.00,0.1.0
+tx-grocery,2026-01-03,POS WHOLE FOODS STORE 123456,-82.45,USD,debit,3417.55,,statement-a,1,text,1.00,0.1.0

@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import BinaryIO, Callable, Literal, Sequence
 from uuid import uuid4
 
+from finsim_analytics import build_report
+from finsim_analytics.models import ProcessedTransaction as AnalyticsTransaction
 from finsim_parser import ParseResult, parse_statement
 from finsim_parser.csv_writer import write_transactions
 from finsim_transactions import apply_feedback, process_files
@@ -238,6 +240,7 @@ class ProcessingService:
             "status": job.status,
             "transactions": [row.as_csv_row() for row in job.transactions],
             "quality_report": job.report.as_dict(),
+            "analytics": build_report(self._analytics_transactions(job.transactions)).as_dict(),
             "statement_summaries": job.parse_summaries,
             "feedback_audit": [record.as_dict() for record in job.audit_records],
             "remembered_merchant_count": len(job.merchant_rules),
@@ -335,6 +338,23 @@ class ProcessingService:
         with self._lock:
             job.stage = stage
             job.progress = progress
+
+    @staticmethod
+    def _analytics_transactions(rows: list[ProcessedTransaction]) -> list[AnalyticsTransaction]:
+        return [
+            AnalyticsTransaction(
+                transaction_id=row.source.transaction_id,
+                posted_at=row.source.posted_at,
+                merchant_clean=row.merchant_clean,
+                amount=row.source.amount,
+                currency=row.source.currency,
+                transaction_type=row.source.transaction_type,
+                category=row.category,
+                category_confidence=row.category_confidence,
+                needs_review=row.needs_review,
+            )
+            for row in rows
+        ]
 
     @staticmethod
     def _remove_workspace(job: JobRecord) -> None:

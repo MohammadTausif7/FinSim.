@@ -2,6 +2,18 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import StatementProcessingWorkspace from './features/statements/StatementProcessingWorkspace'
 import {
+  formatMoney,
+  formatMonthLabel,
+  latestCategories,
+  latestMonth,
+  previousMonth,
+  recentTransactions,
+  sourceLabel,
+  topTrend,
+  useAnalyticsSnapshot,
+  type AnalyticsSnapshot,
+} from './features/analytics/analyticsSnapshot'
+import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
@@ -56,6 +68,48 @@ const categories = [
   { name: 'Shopping', value: 12, amount: '$394', color: '#b9ceff' },
   { name: 'Other', value: 10, amount: '$328', color: '#e5ebf7' },
 ]
+
+const categoryColors = ['#101418', '#2f72ff', '#8aaeff', '#b9ceff', '#e5ebf7', '#75a7ff']
+const merchantTones = ['green', 'blue', 'lime', 'orange', 'violet']
+
+function categoryColor(index: number) {
+  return categoryColors[index % categoryColors.length]
+}
+
+function monthCategoryRows(snapshot: AnalyticsSnapshot) {
+  const rows = latestCategories(snapshot)
+  if (!rows.length) return categories
+  return rows.map((row, index) => ({
+    name: row.category,
+    value: Number(row.share_of_month),
+    amount: formatMoney(row.spending),
+    color: categoryColor(index),
+  }))
+}
+
+function monthlyChange(current: string, previous: string) {
+  const currentValue = Number(current)
+  const previousValue = Number(previous)
+  if (!previousValue) return '0%'
+  return `${Math.abs(((currentValue - previousValue) / previousValue) * 100).toFixed(1)}%`
+}
+
+function transactionPreview(snapshot: AnalyticsSnapshot) {
+  const rows = recentTransactions(snapshot)
+  if (!rows.length) return transactions
+  return rows.map((row, index) => {
+    const merchant = row.merchant_clean || row.description_raw || 'Transaction'
+    const amount = Number(row.amount || 0)
+    return {
+      merchant,
+      category: row.category || 'Other',
+      date: row.posted_at ? formatMonthLabel(String(row.posted_at).slice(0, 7)) : 'Recent',
+      amount: `${amount >= 0 ? '+' : ''}${formatMoney(amount)}`,
+      icon: merchant.slice(0, 2).toUpperCase(),
+      tone: merchantTones[index % merchantTones.length],
+    }
+  })
+}
 
 const typeWords = ['clear.', 'predictable.', 'simpler.']
 
@@ -250,35 +304,57 @@ function SpendingChart({ forecast = false }: { forecast?: boolean }) {
 }
 
 function Dashboard() {
+  const snapshot = useAnalyticsSnapshot()
+  const current = latestMonth(snapshot)
+  const previous = previousMonth(snapshot)
+  const rows = monthCategoryRows(snapshot)
+  const recent = transactionPreview(snapshot)
+  const spendChange = monthlyChange(current.spending, previous.spending)
+  const spendDown = Number(current.spending) <= Number(previous.spending)
+  const savings = Number(current.income) - Number(current.spending)
   return <>
-    <PageHeader eyebrow="SATURDAY, JUNE 20" title="Your money, in focus."><Link className="button button-primary button-compact" to="/statements"><Upload size={16}/> Add statements</Link></PageHeader>
-    <div className="health-banner"><div className="health-score"><span>82</span></div><div><span className="overline">FINANCIAL HEALTH</span><strong>You're building steady momentum.</strong><p>Spending is down and your savings pace is improving.</p></div><Link to="/analytics">View full analysis <ArrowRight size={15}/></Link></div>
-    <div className="metric-grid"><MetricCard label="NET CASH FLOW" value="$1,284.60" trend="12.4%" detail="vs. last month" icon={WalletCards}/><MetricCard label="SPENT THIS MONTH" value="$2,136.42" trend="8.2%" detail="less than May" down icon={CreditCard}/><MetricCard label="SMART SAVINGS" value="$692.18" trend="$84" detail="ahead of target" icon={PiggyBank}/><MetricCard label="MONTHLY PLAN" value="68%" detail="$1,012 remaining" icon={Target}/></div>
-    <div className="dashboard-grid"><article className="panel chart-panel"><div className="panel-head"><div><span className="overline">SPENDING PULSE</span><h2>$2,136.42 <small>this month</small></h2></div><select aria-label="Chart period"><option>Last 6 months</option><option>Last 3 months</option></select></div><SpendingChart/></article><article className="panel category-panel"><div className="panel-head"><div><span className="overline">WHERE IT WENT</span><h2>By category</h2></div><Link to="/analytics">Details <ArrowRight size={14}/></Link></div><div className="donut" style={{background: 'conic-gradient(#101418 0 38%, #2f72ff 38% 62%, #8aaeff 62% 78%, #b9ceff 78% 90%, #e5ebf7 90%)'}}><div><strong>$3,284</strong><small>total</small></div></div><div className="category-list">{categories.slice(0,4).map((item)=><div key={item.name}><span><i style={{background:item.color}}/>{item.name}</span><strong>{item.amount}</strong></div>)}</div></article></div>
-    <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions</h2></div><Link to="/analytics">View all <ArrowRight size={14}/></Link></div><div className="transaction-list">{transactions.map(t=><div className="transaction" key={t.merchant}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
+    <PageHeader eyebrow={sourceLabel(snapshot).toUpperCase()} title="Your money, in focus."><Link className="button button-primary button-compact" to="/statements"><Upload size={16}/> Add statements</Link></PageHeader>
+    <div className="health-banner"><div className="health-score"><span>{Math.max(20, Math.min(95, Math.round((savings / Math.max(Number(current.income), 1)) * 100 + 45)))}</span></div><div><span className="overline">FINANCIAL HEALTH</span><strong>{savings >= 0 ? 'You are building steady momentum.' : 'Spending is running ahead of income.'}</strong><p>{snapshot.source === 'local-processing' ? `Based on ${snapshot.transactionCount} processed transactions from your latest upload.` : 'Upload statements to replace this sample preview with your own analytics.'}</p></div><Link to="/analytics">View full analysis <ArrowRight size={15}/></Link></div>
+    <div className="metric-grid"><MetricCard label="NET CASH FLOW" value={formatMoney(current.net_cash_flow)} detail={`for ${formatMonthLabel(current.month)}`} icon={WalletCards}/><MetricCard label="SPENT THIS MONTH" value={formatMoney(current.spending)} trend={spendChange} detail={spendDown ? 'less than previous month' : 'more than previous month'} down={spendDown} icon={CreditCard}/><MetricCard label="SMART SAVINGS" value={formatMoney(Math.max(savings, 0))} detail={savings >= 0 ? 'income left after spending' : 'negative cash flow'} icon={PiggyBank}/><MetricCard label="TRANSACTIONS" value={String(current.transaction_count)} detail={`${current.review_count} still need review`} icon={Target}/></div>
+    <div className="dashboard-grid"><article className="panel chart-panel"><div className="panel-head"><div><span className="overline">SPENDING PULSE</span><h2>{formatMoney(current.spending)} <small>{formatMonthLabel(current.month)}</small></h2></div><select aria-label="Chart period"><option>Last 3 months</option><option>Latest upload</option></select></div><SpendingChart/></article><article className="panel category-panel"><div className="panel-head"><div><span className="overline">WHERE IT WENT</span><h2>By category</h2></div><Link to="/analytics">Details <ArrowRight size={14}/></Link></div><div className="donut" style={{background: 'conic-gradient(#101418 0 38%, #2f72ff 38% 62%, #8aaeff 62% 78%, #b9ceff 78% 90%, #e5ebf7 90%)'}}><div><strong>{formatMoney(current.spending)}</strong><small>total</small></div></div><div className="category-list">{rows.slice(0,4).map((item)=><div key={item.name}><span><i style={{background:item.color}}/>{item.name}</span><strong>{item.amount}</strong></div>)}</div></article></div>
+    <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions</h2></div><Link to="/analytics">View all <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
   </>
 }
 
 function Analytics() {
-  return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact">Jun 1 to 20 <ChevronRight size={15}/></button></PageHeader>
-    <div className="analytics-callout"><span><Sparkles/></span><div><strong>Your spending cooled by 8.2% this month.</strong><p>Dining drove most of the change. You spent $142 less than your six month average.</p></div><button>Explore insight <ArrowRight/></button></div>
-    <div className="metric-grid three"><MetricCard label="AVERAGE DAILY SPEND" value="$71.21" trend="6.4%" detail="below average" down icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value="$1,248" detail="Housing · 38%" icon={Landmark}/><MetricCard label="RECURRING COSTS" value="$284.50" detail="7 active subscriptions" icon={ReceiptText}/></div>
-    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>Spending trajectory</h2></div><div className="legend"><span><i/>This month</span><span><i/>Last month</span></div></div><SpendingChart/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>$3,284 total</h2></div></div>{categories.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${c.value*2}%`,background:c.color}}/></div><small>{c.value}%</small></div>)}</article></div>
-    <article className="panel"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Worth your attention</h2></div></div><div className="pattern-grid"><div><span className="pattern-icon good"><TrendingUp/></span><strong>Weekend spend is improving</strong><p>Your average weekend is $34 lower than in May.</p></div><div><span className="pattern-icon warn"><Bell/></span><strong>Three price increases</strong><p>Recurring services rose by a combined $18.40.</p></div><div><span className="pattern-icon blue"><Target/></span><strong>Goal within reach</strong><p>You're 82% likely to hit your June savings goal.</p></div></div></article>
+  const snapshot = useAnalyticsSnapshot()
+  const current = latestMonth(snapshot)
+  const rows = monthCategoryRows(snapshot)
+  const trend = topTrend(snapshot)
+  const largest = rows[0] || categories[0]
+  const dailySpend = Number(current.spending) / Math.max(1, current.transaction_count)
+  const anomalyCount = snapshot.analytics.anomaly_candidates.length
+  const patterns = snapshot.analytics.anomaly_candidates.length
+    ? snapshot.analytics.anomaly_candidates.slice(0, 3)
+    : [{ transaction_id: 'no-anomalies', merchant: 'No unusual activity', category: 'Checks', amount: '0.00', reason: 'FinSim did not find obvious anomaly candidates in this run.' }]
+  return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact">{formatMonthLabel(current.month)} <ChevronRight size={15}/></button></PageHeader>
+    <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button>Explore insight <ArrowRight/></button></div>
+    <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALY CANDIDATES" value={String(anomalyCount)} detail="items worth checking" icon={ReceiptText}/></div>
+    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>Spending trajectory</h2></div><div className="legend"><span><i/>This month</span><span><i/>Previous month</span></div></div><SpendingChart/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.min(100, c.value)}%`,background:c.color}}/></div><small>{c.value.toFixed(0)}%</small></div>)}</article></div>
+    <article className="panel"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Worth your attention</h2></div></div><div className="pattern-grid">{patterns.map((item, index)=><div key={item.transaction_id}><span className={index === 0 ? 'pattern-icon warn' : 'pattern-icon blue'}>{index === 0 ? <Bell/> : <Target/>}</span><strong>{item.merchant}</strong><p>{item.reason} · {formatMoney(item.amount)} in {item.category}.</p></div>)}</div></article>
   </>
 }
 
 function Forecast() {
+  const snapshot = useAnalyticsSnapshot()
+  const forecast = snapshot.analytics.forecast
+  const current = latestMonth(snapshot)
   const [dining, setDining] = useState(340)
   const [shopping, setShopping] = useState(390)
-  const [income, setIncome] = useState(4200)
-  // This simple formula exists only to make the adjustable controls genuinely
-  // interactive in Increment 1. Anvitha's model will provide these values later.
-  const predicted = Math.round(2060 + dining * .42 + shopping * .3)
+  const [income, setIncome] = useState(Math.max(3000, Math.round(Number(current.income) || 4200)))
+  const forecastExpected = Number(forecast?.expected_spending || current.spending || 2260)
+  const forecastLow = Number(forecast?.low || forecastExpected - 180)
+  const forecastHigh = Number(forecast?.high || forecastExpected + 220)
+  const predicted = Math.round(forecastExpected + dining * .12 + shopping * .1 - 90)
   const savings = income - predicted
-  return <><PageHeader eyebrow="JULY OUTLOOK" title="Shape your next month."><span className="confidence"><Sparkles size={14}/> Interactive preview</span></PageHeader>
-    <div className="forecast-hero panel"><div><span className="overline">PREDICTED SPENDING</span><strong>${(predicted-180).toLocaleString()} to ${(predicted+220).toLocaleString()}</strong><p>Most likely: <b>${predicted.toLocaleString()}</b></p></div><div className="forecast-health"><span>{Math.round(Math.max(20,Math.min(95,savings/income*200)))}%</span><div><strong>Projected savings rate</strong><small>${savings.toLocaleString()} left after spending</small></div></div></div>
-    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust your assumptions</h2></div><button onClick={()=>{setDining(340);setShopping(390);setIncome(4200)}}>Reset</button></div><p>Move the sliders to see how everyday choices change your forecast.</p><ForecastSlider label="Expected income" value={income} min={3000} max={7000} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={100} max={800} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={100} max={1000} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : 'A small trim keeps your plan on track.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Where it may go</h2></div></div>{[['Housing',1248,44],['Food & dining',dining,18],['Shopping',shopping,14],['Transport',310,11],['Other',270,9]].map(([name,value,width])=><div className="forecast-row" key={name}><div><span>{name}</span><strong>${Number(value).toLocaleString()}</strong></div><div><i style={{width:`${Number(width)*2}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>Preview calculation</strong><p>This uses sample assumptions. Anvitha will replace it with the tested forecasting model.</p></div></div></article></div>
+  return <><PageHeader eyebrow={`${formatMonthLabel(forecast?.target_month || '2026-07').toUpperCase()} OUTLOOK`} title="Shape your next month."><span className="confidence"><Sparkles size={14}/> {forecast?.confidence || 'medium'} confidence</span></PageHeader>
+    <div className="forecast-hero panel"><div><span className="overline">PREDICTED SPENDING</span><strong>{formatMoney(forecastLow)} to {formatMoney(forecastHigh)}</strong><p>Most likely: <b>{formatMoney(forecastExpected)}</b></p></div><div className="forecast-health"><span>{Math.round(Math.max(20,Math.min(95,savings/income*200)))}%</span><div><strong>Projected savings rate</strong><small>{formatMoney(savings)} left after spending</small></div></div></div>
+    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust your assumptions</h2></div><button onClick={()=>{setDining(340);setShopping(390);setIncome(Math.max(3000, Math.round(Number(current.income) || 4200)))}}>Reset</button></div><p>Move the sliders to see how everyday choices change your forecast.</p><ForecastSlider label="Expected income" value={income} min={3000} max={7000} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={100} max={800} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={100} max={1000} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : 'A small trim keeps your plan on track.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Where it may go</h2></div></div>{monthCategoryRows(snapshot).slice(0,5).map((row)=><div className="forecast-row" key={row.name}><div><span>{row.name}</span><strong>{row.amount}</strong></div><div><i style={{width:`${Math.min(100, row.value)}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>{forecast?.method || 'Preview calculation'}</strong><p>{snapshot.source === 'local-processing' ? 'This forecast starts from Anvitha analytics and lets you adjust assumptions.' : 'Process real statements to replace this sample forecast.'}</p></div></div></article></div>
   </>
 }
 

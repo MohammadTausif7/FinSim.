@@ -9,6 +9,7 @@ description = "Temporary processing-job API for the FinSim statement pipeline"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",
+  "finsim-analytics-engine>=0.1,<1",
   "finsim-document-intelligence>=0.1,<1",
   "finsim-transaction-processing>=0.2,<1",
   "python-multipart>=0.0.20,<1",

@@ -33,6 +33,51 @@ export type FeedbackDecision = {
   remember_merchant: boolean
 }
 
+export type AnalyticsReport = {
+  monthly_summaries: Array<{
+    month: string
+    income: string
+    spending: string
+    net_cash_flow: string
+    transaction_count: number
+    review_count: number
+  }>
+  category_breakdown: Array<{
+    month: string
+    category: string
+    spending: string
+    transaction_count: number
+    share_of_month: string
+  }>
+  spending_trends: Array<{
+    month: string
+    category: string
+    previous_spending: string
+    current_spending: string
+    change_amount: string
+    change_percent: string | null
+    direction: 'up' | 'down' | 'flat'
+  }>
+  anomaly_candidates: Array<{
+    transaction_id: string
+    posted_at: string
+    merchant: string
+    category: string
+    amount: string
+    reason: string
+    severity: 'low' | 'medium' | 'high'
+  }>
+  forecast: {
+    target_month: string
+    expected_spending: string
+    low: string
+    high: string
+    method: string
+    confidence: string
+  } | null
+  warnings: string[]
+}
+
 export type ProcessingResult = {
   job_id: string
   status: 'complete'
@@ -42,6 +87,7 @@ export type ProcessingResult = {
     review_rows: number
     warnings: string[]
   }
+  analytics: AnalyticsReport
   feedback_audit: Array<Record<string, string | boolean>>
   remembered_merchant_count: number
   reviewed_merchant_count: number

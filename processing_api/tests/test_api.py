@@ -115,6 +115,10 @@ class ProcessingApiTests(unittest.TestCase):
         self.assertEqual(len(payload["feedback_audit"]), 3)
         self.assertEqual(payload["remembered_merchant_count"], 1)
         self.assertEqual(payload["reviewed_merchant_count"], 1)
+        self.assertEqual(payload["analytics"]["forecast"]["target_month"], "2026-04")
+        self.assertEqual(payload["analytics"]["monthly_summaries"][0]["month"], "2026-01")
+        self.assertEqual(payload["analytics"]["monthly_summaries"][0]["spending"], "20.00")
+        self.assertEqual(payload["analytics"]["category_breakdown"][0]["category"], "Shopping")
 
     def test_feedback_must_cover_the_whole_merchant_group(self) -> None:
         job = self.client.post("/api/processing-jobs", files=sample_files()).json()

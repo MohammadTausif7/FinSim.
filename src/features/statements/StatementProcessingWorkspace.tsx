@@ -35,6 +35,7 @@ import {
   submitFeedback,
   type ApiReviewItem,
 } from './processingApi'
+import { saveProcessingResult } from '../analytics/analyticsSnapshot'
 
 function toStatementFiles(files: File[]) {
   return files.map((file, index): StatementFile => ({
@@ -138,6 +139,7 @@ export default function StatementProcessingWorkspace() {
         if (job.status === 'complete') {
           const result = await getProcessingResult(job.job_id)
           if (cancelled) return
+          saveProcessingResult(result)
           setCompletion({
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
@@ -232,6 +234,7 @@ export default function StatementProcessingWorkspace() {
         }])
         if (remainingAfterDecision === 0 && job.status === 'complete') {
           const result = await getProcessingResult(jobId)
+          saveProcessingResult(result)
           setCompletion({
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
@@ -343,9 +346,10 @@ export default function StatementProcessingWorkspace() {
         <div className="processing-copy">
           <span className="overline">PROCESSING JOB</span>
           <h2>{jobState === 'idle' && 'Waiting for statements'}{jobState === 'processing' && processingStages[stageIndex].label}{jobState === 'review' && `${unresolved.length} ${unresolved.length === 1 ? 'transaction needs' : 'transactions need'} your help`}{jobState === 'finalizing' && 'Applying your choices'}{jobState === 'complete' && 'Your categorized data is ready'}</h2>
-          <p>{jobState === 'idle' && 'Choose files to start the parsing and categorization flow.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim paused before using uncertain categories in your analytics.'}{jobState === 'finalizing' && 'Category totals and quality checks are being refreshed.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'The cleaned results are ready for the analytics integration.')}</p>
+          <p>{jobState === 'idle' && 'Choose files to start the parsing and categorization flow.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim paused before using uncertain categories in your analytics.'}{jobState === 'finalizing' && 'Category totals and quality checks are being refreshed.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'Analytics are ready on the dashboard, analysis and forecast pages.')}</p>
           {jobState === 'review' && <button className="button button-primary button-compact" onClick={() => setReviewOpen(true)}>Review merchants <ArrowRight /></button>}
           {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
+          {jobState === 'complete' && !sampleMode && <a className="button button-primary button-compact analytics-ready-link" href="/analytics">View analytics <ArrowRight /></a>}
         </div>
       </article>
     </section>

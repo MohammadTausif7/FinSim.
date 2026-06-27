@@ -1,0 +1,13 @@
+transaction_id,posted_at,description_raw,merchant_clean,amount,currency,transaction_type,balance,category_raw,category,category_source,category_confidence,needs_review,source_statement_id,page_number,extraction_method,extraction_confidence,parser_version,processing_version
+jan-payroll,2026-01-02,SAMPLE EMPLOYER PAYROLL,Sample Employer,3200.00,USD,credit,4500.00,,Income,keyword,0.95,false,jan,1,text,1.00,0.1.0,0.2.0
+jan-rent,2026-01-03,APARTMENT RENT,Apartment Rent,-1200.00,USD,debit,3300.00,,Housing,keyword,0.95,false,jan,1,text,1.00,0.1.0,0.2.0
+jan-grocery,2026-01-05,WALMART SUPERCENTER,Walmart,-210.40,USD,debit,3089.60,,Groceries,keyword,0.91,false,jan,1,text,1.00,0.1.0,0.2.0
+jan-dining,2026-01-08,BRAUMS STORE,Braum's,-42.20,USD,debit,3047.40,,Dining,keyword,0.91,false,jan,1,text,1.00,0.1.0,0.2.0
+feb-payroll,2026-02-02,SAMPLE EMPLOYER PAYROLL,Sample Employer,3200.00,USD,credit,4700.00,,Income,keyword,0.95,false,feb,1,text,1.00,0.1.0,0.2.0
+feb-rent,2026-02-03,APARTMENT RENT,Apartment Rent,-1200.00,USD,debit,3500.00,,Housing,keyword,0.95,false,feb,1,text,1.00,0.1.0,0.2.0
+feb-grocery,2026-02-05,COSTCO WHSE,Costco,-260.00,USD,debit,3240.00,,Groceries,keyword,0.91,false,feb,1,text,1.00,0.1.0,0.2.0
+feb-travel,2026-02-11,EXPEDIA TRAVEL,Expedia,-390.00,USD,debit,2850.00,,Travel,keyword,0.91,false,feb,1,text,1.00,0.1.0,0.2.0
+mar-payroll,2026-03-02,SAMPLE EMPLOYER PAYROLL,Sample Employer,3200.00,USD,credit,4800.00,,Income,keyword,0.95,false,mar,1,text,1.00,0.1.0,0.2.0
+mar-rent,2026-03-03,APARTMENT RENT,Apartment Rent,-1200.00,USD,debit,3600.00,,Housing,keyword,0.95,false,mar,1,text,1.00,0.1.0,0.2.0
+mar-grocery,2026-03-05,WALMART SUPERCENTER,Walmart,-230.00,USD,debit,3370.00,,Groceries,keyword,0.91,false,mar,1,text,1.00,0.1.0,0.2.0
+mar-unknown,2026-03-09,LOCAL VENDOR,Local Vendor,-65.00,USD,debit,3305.00,,Other,default,0.40,true,mar,1,text,1.00,0.1.0,0.2.0

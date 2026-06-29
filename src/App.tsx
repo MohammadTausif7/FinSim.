@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import StatementProcessingWorkspace from './features/statements/StatementProcessingWorkspace'
+import { signin, signup, verifyEmail } from './features/account/accountApi'
 import {
   formatMoney,
   formatMonthLabel,
@@ -370,8 +371,52 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
 }
 
 function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
-  const signup=kind==='signup'
-  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><div className="auth-form"><span className="mobile-auth-logo"><Logo/></span><span className="overline">{signup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{signup?'Start making sense of it.':'Good to see you.'}</h2><p>{signup?'Account creation will be connected in Increment 2.':'This sign in screen is an Increment 1 frontend preview.'}</p><button className="social-button"><span>G</span> Google sign in preview</button><div className="or"><span/>or preview with email<span/></div>{signup&&<label>Full name<input placeholder="Your name"/></label>}<label>Email address<input type="email" placeholder="you@example.com"/></label><label>Password<div className="password-input"><input type="password" placeholder={signup?'At least 8 characters':'Your password'}/><LockKeyhole/></div></label>{!signup&&<div className="forgot"><label><input type="checkbox"/> Remember me</label><a href="#">Forgot password?</a></div>}<Link to="/dashboard" className="button button-primary auth-submit">Continue to preview <ArrowRight/></Link><small className="auth-switch">{signup?'Already viewing sign in?':'View the account creation screen?'} <Link to={signup?'/signin':'/signup'}>{signup?'Sign in preview':'Sign up preview'}</Link></small>{signup&&<small className="terms">Terms and privacy controls will be added with account services.</small>}</div></main></div>
+  const isSignup = kind === 'signup'
+  const navigate = useNavigate()
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [verificationToken, setVerificationToken] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setLoading(true)
+    setError('')
+    setStatusMessage('')
+    try {
+      if (isSignup) {
+        const result = await signup(fullName, email, password)
+        setVerificationToken(result.verification_token)
+        setStatusMessage('Account created. Use the local verification token below to verify the email.')
+      } else {
+        await signin(email, password)
+        navigate('/dashboard')
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The account request could not be completed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function verifyAndContinue() {
+    setLoading(true)
+    setError('')
+    try {
+      await verifyEmail(verificationToken)
+      await signin(email, password)
+      navigate('/dashboard')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Email verification could not be completed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit}><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start making sense of it.':'Good to see you.'}</h2><p>{isSignup?'Increment 2 now creates a local account and verification token.':'Sign in with a verified local account.'}</p><button className="social-button" type="button"><span>G</span> Google sign in planned</button><div className="or"><span/>or use email<span/></div>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember me</label><a href="#">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} /></label>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and continue'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Sign in'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have a local account?':'Need a local account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">This local account foundation will be connected to production email in a later Increment 2 step.</small>}</form></main></div>
 }
 
 function NotFound(){return <div className="not-found"><Logo/><span>404</span><h1>That page wandered off.</h1><p>Your finances are still exactly where you left them.</p><Link className="button button-primary" to="/">Back home</Link></div>}

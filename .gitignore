@@ -24,6 +24,9 @@ transaction_processing/data/private/
 processing_api/input/
 processing_api/output/
 processing_api/data/private/
+processing_api/data/*.db
+processing_api/data/*.db-shm
+processing_api/data/*.db-wal
 *.egg-info/
 
 # Keep local project notes out of the shared repository.

@@ -5,10 +5,11 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Response, UploadFile, status
+from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
+from .accounts import AccountError, AccountService, AuthError, bearer_token
 from .service import (
     JobNotFoundError,
     JobStateError,
@@ -25,8 +26,41 @@ class FeedbackBody(BaseModel):
     remember_merchant: bool = False
 
 
-def create_app(service: ProcessingService | None = None) -> FastAPI:
+class SignupBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: str = Field(min_length=2)
+    email: str
+    password: str = Field(min_length=8)
+
+
+class SigninBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str
+    password: str
+
+
+class VerifyEmailBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=1)
+
+
+class AccountSettingsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: str | None = None
+    theme: str | None = None
+    monthly_email: bool | None = None
+
+
+def create_app(
+    service: ProcessingService | None = None,
+    account_service: AccountService | None = None,
+) -> FastAPI:
     processing = service or ProcessingService()
+    accounts = account_service or AccountService()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -38,13 +72,68 @@ def create_app(service: ProcessingService | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "DELETE"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "PATCH", "POST", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
     )
 
     @api.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @api.post("/api/accounts/signup", status_code=status.HTTP_201_CREATED)
+    def signup(body: SignupBody) -> dict[str, object]:
+        try:
+            return accounts.signup(body.full_name, body.email, body.password)
+        except AccountError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.post("/api/accounts/verify-email")
+    def verify_email(body: VerifyEmailBody) -> dict[str, object]:
+        try:
+            return {"user": accounts.verify_email(body.token).as_dict()}
+        except AccountError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.post("/api/accounts/signin")
+    def signin(body: SigninBody) -> dict[str, object]:
+        try:
+            return accounts.signin(body.email, body.password)
+        except (AccountError, AuthError) as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+
+    @api.post("/api/accounts/signout", status_code=status.HTTP_204_NO_CONTENT)
+    def signout(authorization: Annotated[str | None, Header()] = None) -> Response:
+        try:
+            accounts.signout(bearer_token(authorization))
+        except AuthError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @api.get("/api/accounts/me")
+    def current_account(authorization: Annotated[str | None, Header()] = None) -> dict[str, object]:
+        try:
+            return {"user": accounts.get_user_for_session(bearer_token(authorization)).as_dict()}
+        except AuthError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+
+    @api.patch("/api/accounts/settings")
+    def update_account_settings(
+        body: AccountSettingsBody,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        try:
+            return {
+                "user": accounts.update_settings(
+                    bearer_token(authorization),
+                    full_name=body.full_name,
+                    theme=body.theme,
+                    monthly_email=body.monthly_email,
+                ).as_dict()
+            }
+        except AccountError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except AuthError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
 
     @api.post("/api/processing-jobs", status_code=status.HTTP_202_ACCEPTED)
     def create_processing_job(

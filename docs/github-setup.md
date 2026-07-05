@@ -21,7 +21,7 @@ Squash merge is a good default for this portfolio project because it keeps the h
 ```bash
 git switch main
 git pull --ff-only origin main
-git switch -c increment-2/your-name
+git switch -c feature/short-description
 ```
 
 For later fixes, use a descriptive branch:

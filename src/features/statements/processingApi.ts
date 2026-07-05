@@ -1,4 +1,4 @@
-import { authHeaders } from '../account/accountApi'
+import { authHeaders, clearSession } from '../account/accountApi'
 
 export type ProcessingJob = {
   job_id: string
@@ -156,6 +156,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
+    if (response.status === 401) {
+      clearSession()
+      throw new Error('Your session expired. Please sign in again before processing statements.')
+    }
     throw new Error(payload?.detail || `Processing service returned ${response.status}.`)
   }
   return response.json() as Promise<T>

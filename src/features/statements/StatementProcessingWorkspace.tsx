@@ -363,7 +363,7 @@ export default function StatementProcessingWorkspace() {
     </section>
 
     <section className="panel job-stage-panel">
-      <div className="panel-head"><div><span className="overline">LIVE PIPELINE</span><h2>From PDFs to categorized data</h2></div><span className="integration-badge">{sampleMode ? 'Safe sample preview' : jobId ? 'Local API connected' : 'Processing API ready'}</span></div>
+      <div className="panel-head"><div><span className="overline">LIVE PIPELINE</span><h2>From PDFs to categorized data</h2></div><span className="integration-badge">{sampleMode ? 'Safe sample run' : jobId ? 'Local API connected' : 'Processing API ready'}</span></div>
       <div className="job-stages">{processingStages.map((stage, index) => {
         const done = jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' || (jobState === 'processing' && index < stageIndex)
         const active = jobState === 'processing' && index === stageIndex
@@ -374,7 +374,7 @@ export default function StatementProcessingWorkspace() {
       })}</div>
     </section>
 
-    <div className="privacy-note panel"><LockKeyhole/><div><strong>Private by design.</strong><p>{sampleMode || files.length === 0 ? 'Safe sample files stay in browser memory.' : 'The local processing service removes temporary PDF copies as soon as parsing finishes.'} Account ownership and retention controls are the next security milestone.</p></div></div>
+    <div className="privacy-note panel"><LockKeyhole/><div><strong>Private by design.</strong><p>{sampleMode || files.length === 0 ? 'Safe sample files stay in browser memory.' : 'The local processing service removes temporary PDF copies as soon as parsing finishes.'} Account data stays scoped to the signed-in user.</p></div></div>
 
     {reviewOpen && currentReview && <div className="review-backdrop" role="presentation">
       <section className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title">
@@ -398,7 +398,7 @@ export default function StatementProcessingWorkspace() {
           </select>
         </fieldset>
         <label className="remember-choice"><input type="checkbox" checked={rememberMerchant} onChange={(event) => setRememberMerchant(event.target.checked)}/><span><strong>Remember this merchant</strong><small>Use the same category for future matching transactions.</small></span></label>
-        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only in this preview.' : 'Your choice is saved with this account processing job.'}</span></div>
+        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only for this sample run.' : 'Your choice is saved with this account processing job.'}</span></div>
       </section>
     </div>}
   </>

@@ -1,4 +1,4 @@
-"""Read Soumya's CSV files and write Sahasra's stable output contract."""
+"""Read extracted transaction CSV files and write the stable processing contract."""
 
 from __future__ import annotations
 

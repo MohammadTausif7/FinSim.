@@ -67,11 +67,11 @@ class ApiConfigurationTests(unittest.TestCase):
     def test_cors_origins_can_be_configured_for_deployment(self) -> None:
         with patch.dict(
             "os.environ",
-            {"FINSIM_CORS_ORIGINS": "https://finsim.example.com, https://preview.example.com/"},
+            {"FINSIM_CORS_ORIGINS": "https://finsim.example.com, https://staging.example.com/"},
         ):
             self.assertEqual(
                 _cors_origins(),
-                ["https://finsim.example.com", "https://preview.example.com"],
+                ["https://finsim.example.com", "https://staging.example.com"],
             )
 
     def test_cors_origins_default_to_local_development(self) -> None:

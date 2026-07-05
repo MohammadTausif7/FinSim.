@@ -2,7 +2,7 @@
 
 FinSim turns monthly bank statements into a clear personal finance workspace. A user creates an account, verifies the account, uploads at least three consecutive monthly PDF statements, reviews any uncertain merchant categories, and then sees dashboard analytics, spending trends, anomaly candidates, and a next month forecast.
 
-This repository is a two increment graduate team project. The current codebase is no longer only a static website prototype. It now has a working React frontend, a FastAPI processing API, local account persistence, PDF statement parsing, transaction cleaning and categorization, analytics, forecasting, anomaly detection, and user saved merchant feedback.
+This repository is a graduate team project that has grown from a product concept into an integrated MVP. It now has a working React frontend, a FastAPI processing API, local account persistence, PDF statement parsing, transaction cleaning and categorization, analytics, forecasting, anomaly detection, and user saved merchant feedback.
 
 ## Current project status
 
@@ -17,7 +17,7 @@ Working now:
 - Monthly summaries, category breakdowns, spending trends, anomaly candidates, and baseline forecast ranges
 - Full unit test coverage across the main Python workstreams plus frontend lint and production build checks
 
-Still planned before a real public financial product:
+Still required before a real public financial product:
 
 - Production email provider instead of local verification tokens
 - Managed production database instead of local SQLite
@@ -41,10 +41,10 @@ Still planned before a real public financial product:
 
 | Contributor | Responsibility |
 |---|---|
-| Mohammad | Product direction, frontend, authenticated user flow, deployment readiness |
-| Soumya | Document intelligence, statement parsing, bank adapters, CSV extraction contract |
-| Sahasra | Transaction cleaning, merchant normalization, categorization, feedback loop |
-| Anvitha | Analytics, forecasting, anomaly detection, dashboard ready report outputs |
+| Product and frontend | Product direction, responsive interface, authenticated user flow, deployment readiness |
+| Document intelligence | Statement parsing, bank adapters, extraction checks, CSV contract |
+| Transaction processing | Cleaning, merchant normalization, categorization, feedback loop |
+| Analytics and forecasting | Spending metrics, forecasting, anomaly detection, dashboard ready report outputs |
 
 ## Requirements
 
@@ -58,7 +58,7 @@ Still planned before a real public financial product:
 Clone the repository and open the project root:
 
 ```bash
-git clone https://github.com/MohammadTausif7/FinSim..git
+git clone https://github.com/YOUR-USERNAME/FinSim..git
 cd FinSim.
 ```
 

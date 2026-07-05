@@ -1,4 +1,4 @@
-"""Validate Soumya's CSV contract before any transformation begins."""
+"""Validate the extracted transaction CSV contract before transformation begins."""
 
 from __future__ import annotations
 

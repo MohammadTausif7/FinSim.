@@ -50,7 +50,7 @@ class AccountUser:
 
 
 class AccountService:
-    """Small account store that gives Increment 2 a real persistence base."""
+    """Small account store that gives the local MVP a real persistence base."""
 
     def __init__(self, db_path: Path | None = None) -> None:
         configured = os.environ.get("FINSIM_ACCOUNT_DB")

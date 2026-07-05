@@ -124,6 +124,18 @@
 .side-profile small{font-size:12px}
 .profile-action{border:0;background:none;color:var(--muted);font-size:11px;font-weight:700;cursor:pointer;padding:4px}
 .profile-action:hover{color:var(--blue)}
+.metric-card-link{display:block;color:var(--text);transition:border-color .2s,transform .2s}
+.metric-card-link:hover{border-color:var(--blue);transform:translateY(-1px)}
+.empty-workspace{display:flex;align-items:center;gap:18px;margin-bottom:14px;padding:28px}
+.empty-workspace>span{width:52px;height:52px;border-radius:14px;background:#edf3ff;color:var(--blue);display:grid;place-items:center;flex:0 0 auto}
+.empty-workspace h2{font-size:24px;letter-spacing:-.8px;margin:5px 0 8px}
+.empty-workspace p{font-size:14px;line-height:1.65;color:var(--muted);max-width:720px;margin:0 0 16px}
+.settings-nav button{display:flex;align-items:center;gap:9px;padding:9px 10px;border:0;border-radius:7px;background:none;color:var(--muted);font-size:13px;font-weight:700;text-align:left;cursor:pointer}
+.settings-nav button.active,.settings-nav button:hover{background:#edf3ff;color:#2f72ff}
+.settings-nav button svg{width:15px;height:15px}
+.settings-note{font-size:12px;line-height:1.6;color:var(--muted);margin:18px 0 0}
+.form-grid input:disabled{opacity:.75;cursor:not-allowed}
+.pattern-grid small{display:block;color:var(--muted);font-size:11px;margin-top:8px}
 
 /* Dark mode uses its own restrained blue surfaces instead of light gradients. */
 :root[data-theme='dark'] .health-banner{border-color:#35507a;background:linear-gradient(100deg,#182b4b 0%,#131e2c 55%,#111820 100%)}

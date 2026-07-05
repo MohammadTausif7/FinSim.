@@ -4,10 +4,10 @@ FinSim is a four person graduate project, so the workflow should show real colla
 
 ## Team ownership
 
-- Mohammad owns product direction, frontend, authenticated user flow, and deployment readiness.
-- Soumya owns document intelligence, statement parsing, bank adapters, and extraction contracts.
-- Sahasra owns cleaning, merchant normalization, categorization, and feedback rules.
-- Anvitha owns analytics, forecasting, anomaly detection, and report outputs.
+- Product and frontend owns the interface, authenticated user flow, and deployment readiness.
+- Document intelligence owns statement parsing, bank adapters, and extraction contracts.
+- Transaction processing owns cleaning, merchant normalization, categorization, and feedback rules.
+- Analytics and forecasting owns financial metrics, anomaly detection, and report outputs.
 
 Everyone should still review and test outside their own area.
 
@@ -18,17 +18,10 @@ Always start from the latest `main`:
 ```bash
 git switch main
 git pull --ff-only origin main
-git switch -c increment-2/your-name
+git switch -c feature/short-description
 ```
 
-For the class workflow, we used owner branches such as:
-
-- `increment-2/mohammad`
-- `increment-2/soumya`
-- `increment-2/sahasra`
-- `increment-2/anvitha`
-
-For future work, use a short descriptive branch if it is not tied to one owner, for example `fix/upload-validation` or `docs/deployment-readiness`.
+Use a short descriptive branch, for example `fix/upload-validation` or `docs/deployment-readiness`.
 
 ## Before committing
 

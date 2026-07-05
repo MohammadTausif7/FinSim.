@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ProcessingResult } from '../statements/processingApi'
-import { authHeaders, getSessionToken, onSessionChange } from '../account/accountApi'
+import { authHeaders, clearSession, getSessionToken, onSessionChange } from '../account/accountApi'
 
 export type MonthlySummary = {
   month: string
@@ -58,7 +58,7 @@ export type AnalyticsReport = {
 }
 
 export type AnalyticsSnapshot = {
-  source: 'sample' | 'local-processing' | 'saved-account'
+  source: 'sample' | 'local-processing' | 'saved-account' | 'empty-account'
   updatedAt: string
   transactionCount: number
   reviewedMerchantCount: number
@@ -126,6 +126,23 @@ export const sampleAnalyticsSnapshot: AnalyticsSnapshot = {
   },
 }
 
+export const emptyAccountSnapshot: AnalyticsSnapshot = {
+  source: 'empty-account',
+  updatedAt: new Date().toISOString(),
+  transactionCount: 0,
+  reviewedMerchantCount: 0,
+  qualityWarningCount: 0,
+  transactions: [],
+  analytics: {
+    monthly_summaries: [],
+    category_breakdown: [],
+    spending_trends: [],
+    anomaly_candidates: [],
+    forecast: null,
+    warnings: ['Upload at least three consecutive monthly statements to build your first financial picture.'],
+  },
+}
+
 export function useAnalyticsSnapshot() {
   const [snapshot, setSnapshot] = useState(loadAnalyticsSnapshot)
 
@@ -180,6 +197,7 @@ export async function refreshSavedAccountAnalytics() {
 }
 
 export function loadAnalyticsSnapshot(): AnalyticsSnapshot {
+  if (getSessionToken()) return emptyAccountSnapshot
   const stored = localStorage.getItem(storageKey)
   if (!stored) return sampleAnalyticsSnapshot
   try {
@@ -197,7 +215,10 @@ async function loadAccountAnalyticsSnapshot(): Promise<AnalyticsSnapshot | null>
     apiRequest<AccountAnalyticsResponse>('/api/accounts/analytics'),
     apiRequest<{ items: Array<Record<string, string | number | boolean | null>> }>('/api/accounts/transactions?limit=500'),
   ])
-  if (!accountAnalytics.transaction_count || !accountAnalytics.analytics.monthly_summaries.length) return null
+  if (!accountAnalytics.transaction_count || !accountAnalytics.analytics.monthly_summaries.length) {
+    localStorage.removeItem(storageKey)
+    return { ...emptyAccountSnapshot, updatedAt: accountAnalytics.generated_at }
+  }
   const snapshot: AnalyticsSnapshot = {
     source: 'saved-account',
     updatedAt: accountAnalytics.generated_at,
@@ -217,6 +238,11 @@ async function apiRequest<T>(path: string): Promise<T> {
   })
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
+    if (response.status === 401) {
+      localStorage.removeItem(storageKey)
+      clearSession()
+      throw new Error('Your session expired. Please sign in again.')
+    }
     throw new Error(payload?.detail || `Analytics service returned ${response.status}.`)
   }
   return response.json() as Promise<T>
@@ -270,5 +296,6 @@ export function formatMonthLabel(month: string) {
 
 export function sourceLabel(snapshot: AnalyticsSnapshot) {
   if (snapshot.source === 'saved-account') return 'Account data'
+  if (snapshot.source === 'empty-account') return 'No statements yet'
   return snapshot.source === 'local-processing' ? 'Local statement data' : 'Sample data'
 }

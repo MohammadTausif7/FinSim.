@@ -22,7 +22,7 @@ python3 --version
 ## Clone the project
 
 ```bash
-git clone https://github.com/MohammadTausif7/FinSim..git
+git clone https://github.com/YOUR-USERNAME/FinSim..git
 cd FinSim.
 code .
 ```

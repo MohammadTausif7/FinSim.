@@ -31,7 +31,7 @@ class AccountApiTests(unittest.TestCase):
         signup = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "mohammad@example.com",
                 "password": "securepass123",
             },
@@ -79,7 +79,7 @@ class AccountApiTests(unittest.TestCase):
         first = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "same@example.com",
                 "password": "securepass123",
             },
@@ -87,7 +87,7 @@ class AccountApiTests(unittest.TestCase):
         duplicate = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "same@example.com",
                 "password": "securepass123",
             },
@@ -100,7 +100,7 @@ class AccountApiTests(unittest.TestCase):
         signup = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "settings@example.com",
                 "password": "securepass123",
             },
@@ -116,11 +116,11 @@ class AccountApiTests(unittest.TestCase):
 
         updated = self.client.patch(
             "/api/accounts/settings",
-            json={"full_name": "Mohammad T", "theme": "dark", "monthly_email": False},
+            json={"full_name": "Updated User", "theme": "dark", "monthly_email": False},
             headers={"Authorization": f"Bearer {session}"},
         )
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json()["user"]["full_name"], "Mohammad T")
+        self.assertEqual(updated.json()["user"]["full_name"], "Updated User")
         self.assertEqual(updated.json()["user"]["theme"], "dark")
         self.assertFalse(updated.json()["user"]["monthly_email"])
 

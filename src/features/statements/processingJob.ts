@@ -29,10 +29,10 @@ export const maximumStatementBytes = 25 * 1024 * 1024
 // elapsed time. A backend can publish these same values without changing the UI.
 export const processingStages = [
   { id: 'validate', label: 'Validating statements', detail: 'Checking file type, count and duplicates', progress: 14 },
-  { id: 'extract', label: 'Reading transactions', detail: 'Soumya parser and reconciliation', progress: 42 },
+  { id: 'extract', label: 'Reading transactions', detail: 'Statement parser and reconciliation checks', progress: 42 },
   { id: 'periods', label: 'Checking monthly coverage', detail: 'Confirming distinct statement periods', progress: 58 },
   { id: 'clean', label: 'Cleaning descriptions', detail: 'Normalizing merchants and removing duplicates', progress: 74 },
-  { id: 'categorize', label: 'Categorizing spending', detail: 'Applying Sahasra rules and confidence scores', progress: 90 },
+  { id: 'categorize', label: 'Categorizing spending', detail: 'Applying category rules and confidence scores', progress: 90 },
 ] as const
 
 export const sampleStatements: StatementFile[] = [

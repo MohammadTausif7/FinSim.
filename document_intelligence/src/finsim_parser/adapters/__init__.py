@@ -1,4 +1,4 @@
-"""Statement format adapters included in Increment 1."""
+"""Statement format adapters verified by the FinSim parser tests."""
 
 from .bank_of_america import BankOfAmericaAdapter
 from .discover import DiscoverAdapter

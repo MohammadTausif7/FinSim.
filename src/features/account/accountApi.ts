@@ -40,6 +40,21 @@ export async function verifyEmail(token: string) {
   })
 }
 
+export async function updateAccountSettings(settings: {
+  full_name?: string
+  theme?: AccountUser['theme']
+  monthly_email?: boolean
+}) {
+  const response = await request<{ user: AccountUser }>('/api/accounts/settings', {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(settings),
+  })
+  localStorage.setItem(userKey, JSON.stringify(response.user))
+  window.dispatchEvent(new Event(sessionEvent))
+  return response
+}
+
 export async function signin(email: string, password: string) {
   const response = await request<SigninResponse>('/api/accounts/signin', {
     method: 'POST',
@@ -116,6 +131,9 @@ async function request<T>(path: string, init: RequestInit, parseJson = true): Pr
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
+    if (response.status === 401 && !path.includes('/signin')) {
+      clearSession()
+    }
     throw new Error(payload?.detail || `Account service returned ${response.status}.`)
   }
   if (!parseJson) return undefined as T

@@ -180,10 +180,22 @@ class ProcessingApiTests(unittest.TestCase):
             "/api/accounts/transactions",
             headers=self.headers,
         ).json()["items"]
+        analytics = self.client.get(
+            "/api/accounts/analytics",
+            headers=self.headers,
+        ).json()
         self.assertEqual(len(batches), 1)
         self.assertEqual(batches[0]["transaction_count"], 3)
         self.assertEqual(len(transactions), 3)
         self.assertTrue(all(row["category"] == "Shopping" for row in transactions))
+        self.assertEqual(analytics["source"], "saved-user-transactions")
+        self.assertEqual(analytics["transaction_count"], 3)
+        self.assertEqual(analytics["latest_batch"]["batch_id"], job["job_id"])
+        self.assertEqual(analytics["analytics"]["forecast"]["target_month"], "2026-04")
+        self.assertEqual(
+            analytics["analytics"]["monthly_summaries"][0]["spending"],
+            "20.00",
+        )
 
     def test_feedback_must_cover_the_whole_merchant_group(self) -> None:
         job = self.client.post(
@@ -302,7 +314,14 @@ class ProcessingApiTests(unittest.TestCase):
             "/api/accounts/statement-batches",
             headers=other_headers,
         ).json()["items"]
+        other_analytics = self.client.get(
+            "/api/accounts/analytics",
+            headers=other_headers,
+        ).json()
         self.assertEqual(other_batches, [])
+        self.assertEqual(other_analytics["transaction_count"], 0)
+        self.assertIsNone(other_analytics["latest_batch"])
+        self.assertIn("No transactions", other_analytics["analytics"]["warnings"][0])
 
 
 if __name__ == "__main__":

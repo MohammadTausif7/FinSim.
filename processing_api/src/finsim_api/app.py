@@ -18,6 +18,7 @@ from .service import (
     UploadSource,
 )
 from .storage import UserDataStore
+from .user_analytics import account_analytics_payload
 
 
 class FeedbackBody(BaseModel):
@@ -155,6 +156,18 @@ def create_app(
     ) -> dict[str, object]:
         user = _require_user(accounts, authorization)
         return {"items": processing.transactions_for_user(user.user_id, limit)}
+
+    @api.get("/api/accounts/analytics")
+    def account_analytics(
+        authorization: Annotated[str | None, Header()] = None,
+        limit: int = 2_000,
+    ) -> dict[str, object]:
+        user = _require_user(accounts, authorization)
+        batches = processing.statement_batches_for_user(user.user_id)
+        return account_analytics_payload(
+            processing.transactions_for_user(user.user_id, limit),
+            latest_batch=batches[0] if batches else None,
+        )
 
     @api.post("/api/processing-jobs", status_code=status.HTTP_202_ACCEPTED)
     def create_processing_job(

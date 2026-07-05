@@ -1,3 +1,5 @@
+import { authHeaders } from '../account/accountApi'
+
 export type ProcessingJob = {
   job_id: string
   status: 'processing' | 'review' | 'complete' | 'error'
@@ -19,6 +21,10 @@ export type ApiReviewItem = {
   amount: string
   confidence: number
   suggestions: string[]
+  category?: string
+  category_source?: string
+  review_reasons?: string[]
+  review_summary?: string
 }
 
 export type ReviewResponse = {
@@ -98,31 +104,44 @@ const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:80
 export async function createProcessingJob(files: File[]) {
   const body = new FormData()
   files.forEach((file) => body.append('files', file))
-  return request<ProcessingJob>('/api/processing-jobs', { method: 'POST', body })
+  return request<ProcessingJob>('/api/processing-jobs', {
+    method: 'POST',
+    headers: authHeaders(),
+    body,
+  })
 }
 
 export function getProcessingJob(jobId: string) {
-  return request<ProcessingJob>(`/api/processing-jobs/${jobId}`)
+  return request<ProcessingJob>(`/api/processing-jobs/${jobId}`, {
+    headers: authHeaders(),
+  })
 }
 
 export function getReviewItems(jobId: string) {
-  return request<ReviewResponse>(`/api/processing-jobs/${jobId}/review`)
+  return request<ReviewResponse>(`/api/processing-jobs/${jobId}/review`, {
+    headers: authHeaders(),
+  })
 }
 
 export function submitFeedback(jobId: string, decisions: FeedbackDecision[]) {
   return request<ProcessingJob>(`/api/processing-jobs/${jobId}/feedback`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(decisions),
   })
 }
 
 export function getProcessingResult(jobId: string) {
-  return request<ProcessingResult>(`/api/processing-jobs/${jobId}/result`)
+  return request<ProcessingResult>(`/api/processing-jobs/${jobId}/result`, {
+    headers: authHeaders(),
+  })
 }
 
 export async function deleteProcessingJob(jobId: string) {
-  const response = await fetch(`${apiBase}/api/processing-jobs/${jobId}`, { method: 'DELETE' })
+  const response = await fetch(`${apiBase}/api/processing-jobs/${jobId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  })
   if (!response.ok && response.status !== 404) {
     throw new Error('The temporary processing job could not be removed.')
   }

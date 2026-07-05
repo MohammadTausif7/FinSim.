@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import secrets
 import sqlite3
@@ -126,7 +127,10 @@ class AccountService:
                 "SELECT * FROM users WHERE email = ?",
                 (normalized_email,),
             ).fetchone()
-            if row is None or _hash_password(password, row["password_salt"]) != row["password_hash"]:
+            if row is None or not hmac.compare_digest(
+                _hash_password(password, row["password_salt"]),
+                row["password_hash"],
+            ):
                 raise AuthError("Email or password is incorrect")
             if not bool(row["email_verified"]):
                 raise AuthError("Email must be verified before signing in")

@@ -5,11 +5,12 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 import tempfile
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from finsim_api.accounts import AccountService
-from finsim_api.app import create_app
+from finsim_api.app import _cors_origins, create_app
 from finsim_api.service import ProcessingService
 from finsim_api.storage import UserDataStore
 from finsim_parser.models import (
@@ -60,6 +61,25 @@ def sample_files(months: tuple[int, ...] = (1, 2, 3)):
         )
         for position, month in enumerate(months, start=1)
     ]
+
+
+class ApiConfigurationTests(unittest.TestCase):
+    def test_cors_origins_can_be_configured_for_deployment(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"FINSIM_CORS_ORIGINS": "https://finsim.example.com, https://preview.example.com/"},
+        ):
+            self.assertEqual(
+                _cors_origins(),
+                ["https://finsim.example.com", "https://preview.example.com"],
+            )
+
+    def test_cors_origins_default_to_local_development(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(
+                _cors_origins(),
+                ["http://localhost:5173", "http://127.0.0.1:5173"],
+            )
 
 
 class ProcessingApiTests(unittest.TestCase):

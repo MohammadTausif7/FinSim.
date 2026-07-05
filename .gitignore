@@ -28,8 +28,3 @@ processing_api/data/*.db
 processing_api/data/*.db-shm
 processing_api/data/*.db-wal
 *.egg-info/
-
-# Keep local project notes out of the shared repository.
-README.md
-CONTRIBUTING.md
-docs/

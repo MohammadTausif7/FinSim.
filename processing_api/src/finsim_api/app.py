@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 from typing import Annotated
 
 from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, Response, UploadFile, status
@@ -77,7 +78,7 @@ def create_app(
     api = FastAPI(title="FinSim Processing API", version="0.1.0", lifespan=lifespan)
     api.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=_cors_origins(),
         allow_credentials=False,
         allow_methods=["GET", "PATCH", "POST", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
@@ -277,6 +278,14 @@ def _get_job(processing: ProcessingService, job_id: str):
         return processing.get_job(job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+def _cors_origins() -> list[str]:
+    configured = os.environ.get("FINSIM_CORS_ORIGINS", "")
+    origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+    if origins:
+        return origins
+    return ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 
 app = create_app()

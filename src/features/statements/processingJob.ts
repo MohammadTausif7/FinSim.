@@ -17,6 +17,7 @@ export type ReviewItem = {
   amount: string
   confidence: number
   suggestions: string[]
+  reviewSummary?: string
   resolvedCategory?: string
   rememberMerchant?: boolean
 }

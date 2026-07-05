@@ -22,6 +22,7 @@ export type SigninResponse = {
 const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 const sessionKey = 'finsim-session-token'
 const userKey = 'finsim-account-user'
+const sessionEvent = 'finsim-session-updated'
 
 export async function signup(fullName: string, email: string, password: string) {
   return request<SignupResponse>('/api/accounts/signup', {
@@ -52,6 +53,39 @@ export async function signin(email: string, password: string) {
 export function saveSession(token: string, user: AccountUser) {
   localStorage.setItem(sessionKey, token)
   localStorage.setItem(userKey, JSON.stringify(user))
+  window.dispatchEvent(new Event(sessionEvent))
+}
+
+export async function signout() {
+  const token = getSessionToken()
+  try {
+    if (token) {
+      await request<void>('/api/accounts/signout', {
+        method: 'POST',
+        headers: authHeaders(),
+      }, false)
+    }
+  } finally {
+    clearSession()
+  }
+}
+
+export function clearSession() {
+  localStorage.removeItem(sessionKey)
+  localStorage.removeItem(userKey)
+  window.dispatchEvent(new Event(sessionEvent))
+}
+
+export function getSessionToken() {
+  return localStorage.getItem(sessionKey)
+}
+
+export function authHeaders(headers: HeadersInit = {}) {
+  const token = getSessionToken()
+  return {
+    ...headers,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
 }
 
 export function getStoredUser() {
@@ -64,7 +98,16 @@ export function getStoredUser() {
   }
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<T> {
+export function onSessionChange(callback: () => void) {
+  window.addEventListener(sessionEvent, callback)
+  window.addEventListener('storage', callback)
+  return () => {
+    window.removeEventListener(sessionEvent, callback)
+    window.removeEventListener('storage', callback)
+  }
+}
+
+async function request<T>(path: string, init: RequestInit, parseJson = true): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${apiBase}${path}`, init)
@@ -75,5 +118,6 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     const payload = await response.json().catch(() => null)
     throw new Error(payload?.detail || `Account service returned ${response.status}.`)
   }
+  if (!parseJson) return undefined as T
   return response.json() as Promise<T>
 }

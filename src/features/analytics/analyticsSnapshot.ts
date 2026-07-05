@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ProcessingResult } from '../statements/processingApi'
+import { authHeaders, getSessionToken, onSessionChange } from '../account/accountApi'
 
 export type MonthlySummary = {
   month: string
@@ -57,17 +58,26 @@ export type AnalyticsReport = {
 }
 
 export type AnalyticsSnapshot = {
-  source: 'sample' | 'local-processing'
+  source: 'sample' | 'local-processing' | 'saved-account'
   updatedAt: string
   transactionCount: number
   reviewedMerchantCount: number
   qualityWarningCount: number
   analytics: AnalyticsReport
-  transactions: Array<Record<string, string>>
+  transactions: Array<Record<string, string | number | boolean | null>>
 }
 
 const storageKey = 'finsim-latest-analytics'
 const updateEvent = 'finsim-analytics-updated'
+const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+
+type AccountAnalyticsResponse = {
+  source: 'saved-user-transactions'
+  transaction_count: number
+  generated_at: string
+  latest_batch: Record<string, unknown> | null
+  analytics: AnalyticsReport
+}
 
 export const sampleAnalyticsSnapshot: AnalyticsSnapshot = {
   source: 'sample',
@@ -123,11 +133,24 @@ export function useAnalyticsSnapshot() {
     function refresh() {
       setSnapshot(loadAnalyticsSnapshot())
     }
+    async function refreshAccountAnalytics() {
+      const accountSnapshot = await loadAccountAnalyticsSnapshot().catch(() => null)
+      if (accountSnapshot) {
+        setSnapshot(accountSnapshot)
+        return
+      }
+      refresh()
+    }
+    void refreshAccountAnalytics()
     window.addEventListener('storage', refresh)
     window.addEventListener(updateEvent, refresh)
+    const removeSessionListener = onSessionChange(() => {
+      void refreshAccountAnalytics()
+    })
     return () => {
       window.removeEventListener('storage', refresh)
       window.removeEventListener(updateEvent, refresh)
+      removeSessionListener()
     }
   }, [])
 
@@ -148,6 +171,14 @@ export function saveProcessingResult(result: ProcessingResult) {
   window.dispatchEvent(new Event(updateEvent))
 }
 
+export async function refreshSavedAccountAnalytics() {
+  const snapshot = await loadAccountAnalyticsSnapshot()
+  if (!snapshot) return null
+  localStorage.setItem(storageKey, JSON.stringify(snapshot))
+  window.dispatchEvent(new Event(updateEvent))
+  return snapshot
+}
+
 export function loadAnalyticsSnapshot(): AnalyticsSnapshot {
   const stored = localStorage.getItem(storageKey)
   if (!stored) return sampleAnalyticsSnapshot
@@ -158,6 +189,37 @@ export function loadAnalyticsSnapshot(): AnalyticsSnapshot {
   } catch {
     return sampleAnalyticsSnapshot
   }
+}
+
+async function loadAccountAnalyticsSnapshot(): Promise<AnalyticsSnapshot | null> {
+  if (!getSessionToken()) return null
+  const [accountAnalytics, transactions] = await Promise.all([
+    apiRequest<AccountAnalyticsResponse>('/api/accounts/analytics'),
+    apiRequest<{ items: Array<Record<string, string | number | boolean | null>> }>('/api/accounts/transactions?limit=500'),
+  ])
+  if (!accountAnalytics.transaction_count || !accountAnalytics.analytics.monthly_summaries.length) return null
+  const snapshot: AnalyticsSnapshot = {
+    source: 'saved-account',
+    updatedAt: accountAnalytics.generated_at,
+    transactionCount: accountAnalytics.transaction_count,
+    reviewedMerchantCount: Number(accountAnalytics.latest_batch?.review_count || 0),
+    qualityWarningCount: accountAnalytics.analytics.warnings.length,
+    analytics: accountAnalytics.analytics,
+    transactions: transactions.items,
+  }
+  localStorage.setItem(storageKey, JSON.stringify(snapshot))
+  return snapshot
+}
+
+async function apiRequest<T>(path: string): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, {
+    headers: authHeaders(),
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw new Error(payload?.detail || `Analytics service returned ${response.status}.`)
+  }
+  return response.json() as Promise<T>
 }
 
 export function latestMonth(snapshot: AnalyticsSnapshot) {
@@ -207,5 +269,6 @@ export function formatMonthLabel(month: string) {
 }
 
 export function sourceLabel(snapshot: AnalyticsSnapshot) {
+  if (snapshot.source === 'saved-account') return 'Account data'
   return snapshot.source === 'local-processing' ? 'Local statement data' : 'Sample data'
 }

@@ -35,7 +35,8 @@ import {
   submitFeedback,
   type ApiReviewItem,
 } from './processingApi'
-import { saveProcessingResult } from '../analytics/analyticsSnapshot'
+import { refreshSavedAccountAnalytics, saveProcessingResult } from '../analytics/analyticsSnapshot'
+import { getSessionToken } from '../account/accountApi'
 
 function toStatementFiles(files: File[]) {
   return files.map((file, index): StatementFile => ({
@@ -61,6 +62,7 @@ function toReviewItem(item: ApiReviewItem): ReviewItem {
     amount: `$${Number(item.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
     confidence: item.confidence,
     suggestions: item.suggestions,
+    reviewSummary: item.review_summary,
   }
 }
 
@@ -140,6 +142,7 @@ export default function StatementProcessingWorkspace() {
           const result = await getProcessingResult(job.job_id)
           if (cancelled) return
           saveProcessingResult(result)
+          void refreshSavedAccountAnalytics().catch(() => undefined)
           setCompletion({
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
@@ -206,6 +209,10 @@ export default function StatementProcessingWorkspace() {
       setError(`Add at least ${minimumStatementCount} monthly statements to build the first financial picture.`)
       return
     }
+    if (!sampleMode && !getSessionToken()) {
+      setError('Sign in before processing statements so results can be saved to your account.')
+      return
+    }
     setReviewItems(sampleReviewItems)
     setStageIndex(0)
     setError('')
@@ -235,6 +242,7 @@ export default function StatementProcessingWorkspace() {
         if (remainingAfterDecision === 0 && job.status === 'complete') {
           const result = await getProcessingResult(jobId)
           saveProcessingResult(result)
+          void refreshSavedAccountAnalytics().catch(() => undefined)
           setCompletion({
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
@@ -380,7 +388,7 @@ export default function StatementProcessingWorkspace() {
           <div><strong>{currentReview.merchant}</strong><small>{(currentReview.occurrenceCount || 1) > 1 ? `${currentReview.occurrenceCount} matching transactions · ${currentReview.description}` : currentReview.description}</small><em>{currentReview.postedAt}</em></div>
           <b>{currentReview.amount}</b>
         </div>
-        <div className="confidence-warning"><Sparkles/><div><strong>Low confidence: {currentReview.confidence}%</strong><p>No bank category or strong merchant rule matched this description.</p></div></div>
+        <div className="confidence-warning"><Sparkles/><div><strong>Low confidence: {currentReview.confidence}%</strong><p>{currentReview.reviewSummary || 'No bank category or strong merchant rule matched this description.'}</p></div></div>
         <fieldset className="category-choices">
           <legend>Choose the best category</legend>
           <div>{currentReview.suggestions.map((category) => <button key={category} onClick={() => resolveReview(category)}>{category}<ArrowRight /></button>)}</div>
@@ -390,7 +398,7 @@ export default function StatementProcessingWorkspace() {
           </select>
         </fieldset>
         <label className="remember-choice"><input type="checkbox" checked={rememberMerchant} onChange={(event) => setRememberMerchant(event.target.checked)}/><span><strong>Remember this merchant</strong><small>Use the same category for future matching transactions.</small></span></label>
-        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only in this preview.' : 'Your choice is applied to this temporary processing job.'}</span></div>
+        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only in this preview.' : 'Your choice is saved with this account processing job.'}</span></div>
       </section>
     </div>}
   </>

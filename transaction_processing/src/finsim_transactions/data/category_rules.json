@@ -1,31 +1,115 @@
 {
   "version": "0.2.0",
   "merchant_aliases": [
+    {"merchant": "7-Eleven", "keywords": ["7-ELEVEN", "7 ELEVEN"]},
+    {"merchant": "Albertsons", "keywords": ["ALBERTSONS"]},
+    {"merchant": "Aldi", "keywords": ["ALDI"]},
     {"merchant": "Amazon", "keywords": ["AMAZON", "AMZN"]},
     {"merchant": "Account transfer", "keywords": ["PHONE/ONLINE TRANSF", "PHONE ONLINE TRANSF", "TRANSFER TO ACC", "TRANSFER FR ACC"]},
+    {"merchant": "Apple", "keywords": ["APPLE.COM/BILL", "APPLE STORE", "APPLEONLINE", "APL*ITUNES", "APL ITUNES"]},
+    {"merchant": "AutoZone", "keywords": ["AUTOZONE"]},
     {"merchant": "Back Market", "keywords": ["BACK MARKET"]},
     {"merchant": "Best Buy", "keywords": ["BEST BUY", "BESTBUY"]},
+    {"merchant": "BP", "keywords": ["BP# ", "BP "]},
     {"merchant": "Braum's", "keywords": ["BRAUM'S", "BRAUMS", "BRAUM S"]},
+    {"merchant": "Burlington", "keywords": ["BURLINGTON"]},
+    {"merchant": "Burger King", "keywords": ["BURGER KING", "BK RESTAURANT"]},
+    {"merchant": "Cash App", "keywords": ["CASH APP", "CASHAPP", "SQ *CASH APP"]},
+    {"merchant": "Chevron", "keywords": ["CHEVRON"]},
+    {"merchant": "Chick-fil-A", "keywords": ["CHICK-FIL-A", "CHICK FIL A", "CHICKFILA"]},
+    {"merchant": "Chipotle", "keywords": ["CHIPOTLE"]},
     {"merchant": "ChatGPT", "keywords": ["OPENAI CHATGPT", "CHATGPT SUBSCR", "OPENAI"]},
     {"merchant": "Chowrastha", "keywords": ["CHOWRASTHA"]},
+    {"merchant": "Circle K", "keywords": ["CIRCLE K"]},
     {"merchant": "Costco", "keywords": ["COSTCO", "COSTCO WHSE"]},
     {"merchant": "Cox Communications", "keywords": ["COX OKLAHOMA", "COX COMM"]},
     {"merchant": "CVS Pharmacy", "keywords": ["CVS/PHARMACY", "CVS PHARMACY"]},
+    {"merchant": "Delta Air Lines", "keywords": ["DELTA AIR", "DELTA AIR LINES", "DELTA.COM"]},
+    {"merchant": "Dollar General", "keywords": ["DOLLAR GENERAL", "DG STORE"]},
+    {"merchant": "Dollar Tree", "keywords": ["DOLLAR TREE"]},
+    {"merchant": "DoorDash", "keywords": ["DOORDASH", "DD *DOORDASH"]},
+    {"merchant": "Domino's", "keywords": ["DOMINO'S", "DOMINOS"]},
+    {"merchant": "Dunkin'", "keywords": ["DUNKIN", "DUNKIN DONUTS"]},
     {"merchant": "eBay", "keywords": ["EBAY"]},
+    {"merchant": "Etsy", "keywords": ["ETSY"]},
+    {"merchant": "ExxonMobil", "keywords": ["EXXON", "EXXONMOBIL", "MOBIL GAS", "MOBIL MART"]},
     {"merchant": "Expedia", "keywords": ["EXPEDIA"]},
+    {"merchant": "Family Dollar", "keywords": ["FAMILY DOLLAR"]},
+    {"merchant": "FedEx", "keywords": ["FEDEX"]},
+    {"merchant": "Food Lion", "keywords": ["FOOD LION"]},
+    {"merchant": "Gap", "keywords": ["GAP.COM", "GAP INC", "GAP FACTORY"]},
+    {"merchant": "Giant Eagle", "keywords": ["GIANT EAGLE"]},
+    {"merchant": "Google", "keywords": ["GOOGLE *", "GOOGLE STORE", "GOOGLE SERVICES"]},
     {"merchant": "Great Clips", "keywords": ["GREAT CLIPS"]},
+    {"merchant": "H-E-B", "keywords": ["H-E-B", "HEB GROCERY", "H E B"]},
+    {"merchant": "H Mart", "keywords": ["H MART", "HMART"]},
+    {"merchant": "Hilton", "keywords": ["HILTON"]},
+    {"merchant": "Home Depot", "keywords": ["HOME DEPOT", "Homedepot.com", "THE HOME DEPOT"]},
+    {"merchant": "Hyatt", "keywords": ["HYATT"]},
+    {"merchant": "IKEA", "keywords": ["IKEA"]},
     {"merchant": "Instacart", "keywords": ["INSTACART"]},
     {"merchant": "Islamic Society", "keywords": ["ISLAMIC SOCIETY"]},
+    {"merchant": "JCPenney", "keywords": ["JCPENNEY", "J C PENNEY"]},
+    {"merchant": "Kohl's", "keywords": ["KOHLS", "KOHL'S"]},
+    {"merchant": "Kroger", "keywords": ["KROGER"]},
+    {"merchant": "Lowe's", "keywords": ["LOWE'S", "LOWES", "LOWE S"]},
     {"merchant": "Lyft", "keywords": ["LYFT"]},
+    {"merchant": "Macy's", "keywords": ["MACY'S", "MACYS"]},
+    {"merchant": "Marathon", "keywords": ["MARATHON PETRO", "MARATHON"]},
+    {"merchant": "Marriott", "keywords": ["MARRIOTT"]},
+    {"merchant": "Marshalls", "keywords": ["MARSHALLS"]},
+    {"merchant": "McDonald's", "keywords": ["MCDONALD", "MCDONALD'S"]},
+    {"merchant": "Meijer", "keywords": ["MEIJER"]},
+    {"merchant": "Menards", "keywords": ["MENARDS"]},
+    {"merchant": "Microsoft", "keywords": ["MICROSOFT", "MSFT"]},
     {"merchant": "Mint Mobile", "keywords": ["MINT MOBILE"]},
+    {"merchant": "Murphy USA", "keywords": ["MURPHY USA", "MURPHY EXPRESS"]},
     {"merchant": "Netflix", "keywords": ["NETFLIX"]},
+    {"merchant": "Nike", "keywords": ["NIKE"]},
+    {"merchant": "Nordstrom", "keywords": ["NORDSTROM", "NORDSTROM RACK"]},
     {"merchant": "OG&E", "keywords": ["OG&E", "OGE ONLINE PAY"]},
+    {"merchant": "Old Navy", "keywords": ["OLD NAVY", "OLDNAVY"]},
+    {"merchant": "Panera Bread", "keywords": ["PANERA"]},
+    {"merchant": "Papa Johns", "keywords": ["PAPA JOHN"]},
+    {"merchant": "PayPal", "keywords": ["PAYPAL", "PYPL"]},
+    {"merchant": "Petco", "keywords": ["PETCO"]},
+    {"merchant": "PetSmart", "keywords": ["PETSMART"]},
+    {"merchant": "Phillips 66", "keywords": ["PHILLIPS 66", "PHILLIPS66"]},
+    {"merchant": "Pizza Hut", "keywords": ["PIZZA HUT"]},
+    {"merchant": "Publix", "keywords": ["PUBLIX"]},
+    {"merchant": "QuikTrip", "keywords": ["QUIKTRIP", "QT "]},
+    {"merchant": "Regal Cinemas", "keywords": ["REGAL CINEMAS", "REGAL"]},
+    {"merchant": "Rite Aid", "keywords": ["RITE AID"]},
+    {"merchant": "Ross", "keywords": ["ROSS DRESS", "ROSS STORES", "ROSS"]},
+    {"merchant": "Safeway", "keywords": ["SAFEWAY"]},
+    {"merchant": "Sam's Club", "keywords": ["SAM'S CLUB", "SAMS CLUB", "SAMSCLUB", "SAMSCLUB.COM", "SAM S CLUB"]},
+    {"merchant": "Sephora", "keywords": ["SEPHORA"]},
+    {"merchant": "Shell", "keywords": ["SHELL OIL", "SHELL SERVICE", "SHELL "]},
+    {"merchant": "ShopRite", "keywords": ["SHOPRITE", "SHOP RITE"]},
     {"merchant": "Starbucks", "keywords": ["STARBUCKS"]},
+    {"merchant": "Sprouts", "keywords": ["SPROUTS FARMERS", "SPROUTS"]},
+    {"merchant": "Speedway", "keywords": ["SPEEDWAY"]},
+    {"merchant": "Subway", "keywords": ["SUBWAY"]},
     {"merchant": "Taco Bell", "keywords": ["TACO BELL"]},
+    {"merchant": "Target", "keywords": ["TARGET", "TGT STORE", "TARGET.COM"]},
+    {"merchant": "Temu", "keywords": ["TEMU"]},
+    {"merchant": "TJ Maxx", "keywords": ["TJ MAXX", "T.J. MAXX", "TJX"]},
+    {"merchant": "Trader Joe's", "keywords": ["TRADER JOE", "TRADER JOE'S"]},
     {"merchant": "Turkish Airlines", "keywords": ["TURKISH AIR"]},
+    {"merchant": "Ulta Beauty", "keywords": ["ULTA", "ULTA BEAUTY"]},
+    {"merchant": "United Airlines", "keywords": ["UNITED AIR", "UNITED AIRLINES", "UNITED.COM"]},
+    {"merchant": "UPS", "keywords": ["UPS STORE", "UNITED PARCEL"]},
+    {"merchant": "USPS", "keywords": ["USPS", "POSTAL SERVICE"]},
     {"merchant": "Uber Eats", "keywords": ["UBER EATS", "UBER *EATS"]},
     {"merchant": "University bursar", "keywords": ["BURSAR PURCHASE", "BURSAR PAYMENT"]},
+    {"merchant": "Valero", "keywords": ["VALERO"]},
+    {"merchant": "Venmo", "keywords": ["VENMO"]},
+    {"merchant": "Walgreens", "keywords": ["WALGREENS", "WALGREEN"]},
     {"merchant": "Walmart", "keywords": ["WALMART", "WAL-MART", "WM SUPERCENTER"]},
+    {"merchant": "Wayfair", "keywords": ["WAYFAIR"]},
+    {"merchant": "Wegmans", "keywords": ["WEGMANS"]},
+    {"merchant": "Wendy's", "keywords": ["WENDY'S", "WENDYS"]},
+    {"merchant": "WinCo Foods", "keywords": ["WINCO", "WINCO FOODS"]},
     {"merchant": "Zelle", "keywords": ["ZELLE"]},
     {"merchant": "Whole Foods Market", "keywords": ["WHOLE FOODS"]}
   ],
@@ -41,13 +125,13 @@
       "category": "Transfers",
       "priority": 15,
       "confidence": 0.95,
-      "keywords": ["ZELLE", "PHONE/ONLINE TRANSF", "PHONE ONLINE TRANSF", "TRANSFER TO ACC", "TRANSFER FR ACC"]
+      "keywords": ["ZELLE", "VENMO", "CASH APP", "CASHAPP", "PAYPAL TRANSFER", "PHONE/ONLINE TRANSF", "PHONE ONLINE TRANSF", "TRANSFER TO ACC", "TRANSFER FR ACC"]
     },
     {
       "category": "Dining",
       "priority": 20,
       "confidence": 0.92,
-      "keywords": ["RESTAURANT", "CAFE", "COFFEE", "STARBUCKS", "DOORDASH", "UBER EATS", "MCDONALD", "BRAUM'S", "BRAUMS", "BRAUM S", "TACO BELL", "CHOWRASTHA"]
+      "keywords": ["RESTAURANT", "CAFE", "COFFEE", "STARBUCKS", "DOORDASH", "DD *DOORDASH", "UBER EATS", "MCDONALD", "CHICK-FIL-A", "CHICK FIL A", "CHIPOTLE", "PANERA", "SUBWAY", "WENDY'S", "WENDYS", "BURGER KING", "DOMINO'S", "DOMINOS", "PIZZA HUT", "PAPA JOHN", "DUNKIN", "BRAUM'S", "BRAUMS", "BRAUM S", "TACO BELL", "CHOWRASTHA"]
     },
     {
       "category": "Subscriptions",
@@ -59,19 +143,19 @@
       "category": "Groceries",
       "priority": 40,
       "confidence": 0.90,
-      "keywords": ["GROCERY", "SUPERMARKET", "WHOLE FOODS", "TRADER JOE", "KROGER", "ALDI", "COSTCO", "COSTCO WHSE", "INSTACART"]
+      "keywords": ["GROCERY", "SUPERMARKET", "WHOLE FOODS", "TRADER JOE", "KROGER", "ALDI", "COSTCO", "COSTCO WHSE", "SAMS CLUB", "SAM'S CLUB", "SAMSCLUB", "INSTACART", "PUBLIX", "SAFEWAY", "ALBERTSONS", "H-E-B", "HEB GROCERY", "MEIJER", "WEGMANS", "FOOD LION", "GIANT EAGLE", "SHOPRITE", "SPROUTS", "WINCO", "H MART"]
     },
     {
       "category": "Healthcare",
       "priority": 50,
       "confidence": 0.90,
-      "keywords": ["PHARMACY", "WALGREENS", "CVS", "HOSPITAL", "CLINIC", "DENTAL", "MEDICAL"]
+      "keywords": ["PHARMACY", "WALGREENS", "CVS", "RITE AID", "HOSPITAL", "CLINIC", "DENTAL", "MEDICAL"]
     },
     {
       "category": "Transport",
       "priority": 60,
       "confidence": 0.88,
-      "keywords": ["UBER", "LYFT", "GAS", "SHELL", "EXXON", "CHEVRON", "PARKING", "TRANSIT"]
+      "keywords": ["UBER", "LYFT", "GAS", "SHELL", "EXXON", "EXXONMOBIL", "CHEVRON", "BP ", "VALERO", "MARATHON", "SPEEDWAY", "MURPHY USA", "PHILLIPS 66", "QUIKTRIP", "CIRCLE K", "7-ELEVEN", "7 ELEVEN", "PARKING", "TRANSIT"]
     },
     {
       "category": "Utilities",
@@ -83,13 +167,13 @@
       "category": "Housing",
       "priority": 80,
       "confidence": 0.92,
-      "keywords": ["RENT", "MORTGAGE", "HOME IMPROVEMENT", "PROPERTY MANAGEMENT"]
+      "keywords": ["RENT", "MORTGAGE", "HOME IMPROVEMENT", "PROPERTY MANAGEMENT", "HOME DEPOT", "LOWE'S", "LOWES", "MENARDS", "IKEA"]
     },
     {
       "category": "Travel",
       "priority": 90,
       "confidence": 0.88,
-      "keywords": ["AIRLINES", "AIRWAYS", "HOTEL", "AIRBNB", "BOOKING.COM", "CAR RENTAL", "EXPEDIA", "TURKISH AIR"]
+      "keywords": ["AIRLINES", "AIRWAYS", "HOTEL", "AIRBNB", "VRBO", "BOOKING.COM", "CAR RENTAL", "EXPEDIA", "TURKISH AIR", "DELTA AIR", "UNITED AIR", "SOUTHWEST AIR", "AMERICAN AIR", "MARRIOTT", "HILTON", "HYATT"]
     },
     {
       "category": "Education",
@@ -107,13 +191,13 @@
       "category": "Entertainment",
       "priority": 120,
       "confidence": 0.85,
-      "keywords": ["CINEMA", "THEATRE", "MOVIE", "TICKETMASTER", "STEAM GAMES"]
+      "keywords": ["CINEMA", "THEATRE", "MOVIE", "TICKETMASTER", "STEAM GAMES", "AMC THEAT", "REGAL CINEMAS"]
     },
     {
       "category": "Shopping",
       "priority": 130,
       "confidence": 0.82,
-      "keywords": ["AMAZON", "AMZN", "TARGET", "WALMART", "WAL-MART", "WM SUPERCENTER", "SHEIN", "GAP.COM", "DEPARTMENT STORE", "BEST BUY", "BESTBUY", "EBAY", "BACK MARKET"]
+      "keywords": ["AMAZON", "AMZN", "TARGET", "TGT STORE", "WALMART", "WAL-MART", "WM SUPERCENTER", "SHEIN", "TEMU", "ETSY", "GAP.COM", "OLD NAVY", "DEPARTMENT STORE", "DOLLAR GENERAL", "DOLLAR TREE", "FAMILY DOLLAR", "BEST BUY", "BESTBUY", "EBAY", "BACK MARKET", "MACY'S", "MACYS", "KOHLS", "KOHL'S", "NORDSTROM", "JCPENNEY", "TJ MAXX", "TJX", "MARSHALLS", "ROSS", "BURLINGTON", "NIKE", "ADIDAS", "SEPHORA", "ULTA", "PETSMART", "PETCO", "WAYFAIR", "APPLE STORE", "GOOGLE STORE", "MICROSOFT"]
     },
     {
       "category": "Charity",
@@ -124,8 +208,8 @@
     {
       "category": "Services",
       "priority": 150,
-      "confidence": 0.75,
-      "keywords": ["SERVICE", "SALON", "CLEANING", "REPAIR", "GREAT CLIPS"]
+      "confidence": 0.82,
+      "keywords": ["SERVICE", "SALON", "CLEANING", "REPAIR", "GREAT CLIPS", "USPS", "POSTAL SERVICE", "UPS STORE", "FEDEX", "AUTOZONE"]
     }
   ]
 }

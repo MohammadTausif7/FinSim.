@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import BinaryIO, Callable, Literal, Sequence
+from typing import BinaryIO, Callable, Literal, Mapping, Sequence
 from uuid import uuid4
 
 from finsim_analytics import build_report
@@ -63,6 +63,8 @@ class JobRecord:
     audit_records: list[FeedbackAuditRecord] = field(default_factory=list)
     merchant_rules: dict[str, str] = field(default_factory=dict)
     feedback_group_count: int = 0
+    user_id: str | None = None
+    persisted: bool = False
     error: str | None = None
 
 
@@ -74,13 +76,21 @@ class ProcessingService:
         *,
         parse_statement_fn: Callable[[Path], ParseResult] = parse_statement,
         process_files_fn: Callable[..., tuple[list[ProcessedTransaction], QualityReport]] = process_files,
+        data_store: object | None = None,
     ) -> None:
         self._parse_statement = parse_statement_fn
         self._process_files = process_files_fn
+        self.data_store = data_store
         self._jobs: dict[str, JobRecord] = {}
         self._lock = threading.RLock()
 
-    def create_job(self, uploads: Sequence[UploadSource]) -> JobRecord:
+    def create_job(
+        self,
+        uploads: Sequence[UploadSource],
+        *,
+        user_id: str | None = None,
+        merchant_rules: Mapping[str, str] | None = None,
+    ) -> JobRecord:
         if not MINIMUM_STATEMENTS <= len(uploads) <= MAXIMUM_STATEMENTS:
             raise ValueError(
                 f"Upload between {MINIMUM_STATEMENTS} and {MAXIMUM_STATEMENTS} statements"
@@ -114,7 +124,14 @@ class ProcessingService:
             shutil.rmtree(workspace, ignore_errors=True)
             raise
 
-        job = JobRecord(job_id, filenames, workspace, statement_paths)
+        job = JobRecord(
+            job_id,
+            filenames,
+            workspace,
+            statement_paths,
+            user_id=user_id,
+            merchant_rules=dict(merchant_rules or {}),
+        )
         with self._lock:
             self._jobs[job_id] = job
         return job
@@ -146,6 +163,7 @@ class ProcessingService:
                 job.report = report
                 job.status = "review" if self._category_review_rows(job) else "complete"
                 job.progress = 92 if job.status == "review" else 100
+            self._persist_if_complete(job)
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
             with self._lock:
                 job.status = "error"
@@ -176,6 +194,8 @@ class ProcessingService:
             job.feedback_group_count += group_count
             job.status = "review" if self._category_review_rows(job) else "complete"
             job.progress = 92 if job.status == "review" else 100
+        self._save_user_merchant_rules(job)
+        self._persist_if_complete(job)
         return job
 
     def get_job(self, job_id: str) -> JobRecord:
@@ -235,6 +255,7 @@ class ProcessingService:
     def result_view(self, job: JobRecord) -> dict[str, object]:
         if job.status != "complete" or job.report is None:
             raise JobStateError("Processing results are available only after review is complete")
+        self._persist_if_complete(job)
         return {
             "job_id": job.job_id,
             "status": job.status,
@@ -246,6 +267,21 @@ class ProcessingService:
             "remembered_merchant_count": len(job.merchant_rules),
             "reviewed_merchant_count": job.feedback_group_count,
         }
+
+    def saved_merchant_rules(self, user_id: str) -> dict[str, str]:
+        if self.data_store is None:
+            return {}
+        return self.data_store.merchant_rules_for_user(user_id)
+
+    def statement_batches_for_user(self, user_id: str) -> list[dict[str, object]]:
+        if self.data_store is None:
+            return []
+        return self.data_store.statement_batches_for_user(user_id)
+
+    def transactions_for_user(self, user_id: str, limit: int = 500) -> list[dict[str, object]]:
+        if self.data_store is None:
+            return []
+        return self.data_store.transactions_for_user(user_id, limit)
 
     @staticmethod
     def _copy_upload(source: BinaryIO, destination: Path) -> tuple[str, int, bytes]:
@@ -355,6 +391,24 @@ class ProcessingService:
             )
             for row in rows
         ]
+
+    def _persist_if_complete(self, job: JobRecord) -> None:
+        if (
+            self.data_store is None
+            or job.persisted
+            or job.user_id is None
+            or job.status != "complete"
+            or job.report is None
+        ):
+            return
+        self.data_store.save_completed_job(job)
+        with self._lock:
+            job.persisted = True
+
+    def _save_user_merchant_rules(self, job: JobRecord) -> None:
+        if self.data_store is None or job.user_id is None or not job.merchant_rules:
+            return
+        self.data_store.save_merchant_rules(job.user_id, job.merchant_rules)
 
     @staticmethod
     def _remove_workspace(job: JobRecord) -> None:

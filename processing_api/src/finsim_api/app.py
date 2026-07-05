@@ -13,9 +13,11 @@ from .accounts import AccountError, AccountService, AuthError, bearer_token
 from .service import (
     JobNotFoundError,
     JobStateError,
+    JobRecord,
     ProcessingService,
     UploadSource,
 )
+from .storage import UserDataStore
 
 
 class FeedbackBody(BaseModel):
@@ -58,9 +60,13 @@ class AccountSettingsBody(BaseModel):
 def create_app(
     service: ProcessingService | None = None,
     account_service: AccountService | None = None,
+    data_store: UserDataStore | None = None,
 ) -> FastAPI:
-    processing = service or ProcessingService()
     accounts = account_service or AccountService()
+    store = data_store or UserDataStore(accounts.db_path)
+    processing = service or ProcessingService(data_store=store)
+    if processing.data_store is None:
+        processing.data_store = store
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -135,35 +141,67 @@ def create_app(
         except AuthError as error:
             raise HTTPException(status_code=401, detail=str(error)) from error
 
+    @api.get("/api/accounts/statement-batches")
+    def account_statement_batches(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        user = _require_user(accounts, authorization)
+        return {"items": processing.statement_batches_for_user(user.user_id)}
+
+    @api.get("/api/accounts/transactions")
+    def account_transactions(
+        authorization: Annotated[str | None, Header()] = None,
+        limit: int = 500,
+    ) -> dict[str, object]:
+        user = _require_user(accounts, authorization)
+        return {"items": processing.transactions_for_user(user.user_id, limit)}
+
     @api.post("/api/processing-jobs", status_code=status.HTTP_202_ACCEPTED)
     def create_processing_job(
         background_tasks: BackgroundTasks,
         files: Annotated[list[UploadFile], File(description="Three to twelve PDF statements")],
+        authorization: Annotated[str | None, Header()] = None,
     ) -> dict[str, object]:
+        user = _require_user(accounts, authorization)
         uploads = [
             UploadSource(file.filename or "", file.content_type, file.file)
             for file in files
         ]
         try:
-            job = processing.create_job(uploads)
+            job = processing.create_job(
+                uploads,
+                user_id=user.user_id,
+                merchant_rules=processing.saved_merchant_rules(user.user_id),
+            )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
         background_tasks.add_task(processing.process_job, job.job_id)
         return processing.job_view(job)
 
     @api.get("/api/processing-jobs/{job_id}")
-    def get_processing_job(job_id: str) -> dict[str, object]:
-        return processing.job_view(_get_job(processing, job_id))
+    def get_processing_job(
+        job_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        return processing.job_view(_get_owned_job(processing, accounts, job_id, authorization))
 
     @api.get("/api/processing-jobs/{job_id}/review")
-    def get_review_items(job_id: str) -> dict[str, object]:
-        job = _get_job(processing, job_id)
+    def get_review_items(
+        job_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        job = _get_owned_job(processing, accounts, job_id, authorization)
         if job.status not in {"review", "complete"}:
             raise HTTPException(status_code=409, detail="Review items are not ready")
         return processing.review_view(job)
 
     @api.post("/api/processing-jobs/{job_id}/feedback")
-    def submit_feedback(job_id: str, decisions: list[FeedbackBody]) -> dict[str, object]:
+    def submit_feedback(
+        job_id: str,
+        decisions: list[FeedbackBody],
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        _get_owned_job(processing, accounts, job_id, authorization)
         payload = [decision.model_dump() for decision in decisions]
         try:
             job = processing.apply_job_feedback(job_id, payload)
@@ -176,14 +214,22 @@ def create_app(
         return processing.job_view(job)
 
     @api.get("/api/processing-jobs/{job_id}/result")
-    def get_result(job_id: str) -> dict[str, object]:
+    def get_result(
+        job_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        job = _get_owned_job(processing, accounts, job_id, authorization)
         try:
-            return processing.result_view(_get_job(processing, job_id))
+            return processing.result_view(job)
         except JobStateError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
     @api.delete("/api/processing-jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-    def delete_processing_job(job_id: str) -> Response:
+    def delete_processing_job(
+        job_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> Response:
+        _get_owned_job(processing, accounts, job_id, authorization)
         try:
             processing.delete_job(job_id)
         except JobNotFoundError as error:
@@ -191,6 +237,26 @@ def create_app(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return api
+
+
+def _require_user(accounts: AccountService, authorization: str | None):
+    try:
+        return accounts.get_user_for_session(bearer_token(authorization))
+    except AuthError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+
+
+def _get_owned_job(
+    processing: ProcessingService,
+    accounts: AccountService,
+    job_id: str,
+    authorization: str | None,
+) -> JobRecord:
+    user = _require_user(accounts, authorization)
+    job = _get_job(processing, job_id)
+    if job.user_id != user.user_id:
+        raise HTTPException(status_code=404, detail=f"Processing job {job_id!r} was not found")
+    return job
 
 
 def _get_job(processing: ProcessingService, job_id: str):

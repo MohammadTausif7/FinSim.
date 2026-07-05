@@ -23,6 +23,8 @@ from finsim_transactions.feedback import FeedbackAuditRecord, FeedbackError, par
 from finsim_transactions.models import ProcessedTransaction, QualityReport
 from finsim_transactions.rules import available_categories, load_rulebook
 
+from .review import review_reasons, review_suggestions, review_summary
+
 
 MINIMUM_STATEMENTS = 3
 MAXIMUM_STATEMENTS = 12
@@ -232,8 +234,9 @@ class ProcessingService:
         }
 
     def review_view(self, job: JobRecord) -> dict[str, object]:
-        categories = sorted(available_categories(load_rulebook()))
-        common_choices = ["Shopping", "Dining", "Services"]
+        rulebook = load_rulebook()
+        category_set = available_categories(rulebook)
+        categories = sorted(category_set)
         items = []
         for rows in self._category_review_groups(job):
             row = rows[0]
@@ -247,7 +250,15 @@ class ProcessingService:
                     "posted_at": min(item.source.posted_at for item in rows).isoformat(),
                     "amount": format(sum(abs(item.source.amount) for item in rows), ".2f"),
                     "confidence": int(min(item.category_confidence for item in rows) * 100),
-                    "suggestions": common_choices,
+                    "category": row.category,
+                    "category_source": row.category_source,
+                    "review_reasons": review_reasons(rows),
+                    "review_summary": review_summary(rows),
+                    "suggestions": review_suggestions(
+                        rows,
+                        rulebook=rulebook,
+                        categories=category_set,
+                    ),
                 }
             )
         return {"job_id": job.job_id, "items": items, "categories": categories}

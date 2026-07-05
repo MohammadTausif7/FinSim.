@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import StatementProcessingWorkspace from './features/statements/StatementProcessingWorkspace'
 import { getStoredUser, onSessionChange, signin, signout, signup, updateAccountSettings, verifyEmail } from './features/account/accountApi'
 import {
+  clearCachedAnalytics,
   formatMoney,
   formatMonthLabel,
   latestCategories,
   latestMonth,
-  previousMonth,
   recentTransactions,
-  sourceLabel,
   topTrend,
   useAnalyticsSnapshot,
+  type AnomalyCandidate,
   type AnalyticsSnapshot,
 } from './features/analytics/analyticsSnapshot'
 import {
@@ -23,20 +23,15 @@ import {
   BrainCircuit,
   Check,
   ChevronRight,
-  CircleHelp,
-  CreditCard,
   FileCheck2,
   FileText,
   Gauge,
   Landmark,
-  LayoutDashboard,
   LockKeyhole,
   Menu,
   Moon,
   MoreHorizontal,
-  PiggyBank,
   ReceiptText,
-  Search,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -45,9 +40,9 @@ import {
   TrendingUp,
   Upload,
   User,
-  WalletCards,
   X,
   Zap,
+  type LucideIcon,
 } from 'lucide-react'
 
 type Theme = 'light' | 'dark'
@@ -88,13 +83,6 @@ function monthCategoryRows(snapshot: AnalyticsSnapshot) {
   }))
 }
 
-function monthlyChange(current: string, previous: string) {
-  const currentValue = Number(current)
-  const previousValue = Number(previous)
-  if (!previousValue) return '0%'
-  return `${Math.abs(((currentValue - previousValue) / previousValue) * 100).toFixed(1)}%`
-}
-
 function transactionPreview(snapshot: AnalyticsSnapshot) {
   const rows = recentTransactions(snapshot)
   if (!rows.length) return snapshot.source === 'sample' ? transactions : []
@@ -130,6 +118,49 @@ function EmptyWorkspace({ title, message }: { title: string; message: string }) 
   )
 }
 
+function AnomalyDialog({ items, onClose }: { items: AnomalyCandidate[]; onClose: () => void }) {
+  const rows = items.length ? items : []
+  return (
+    <div className="review-backdrop" role="presentation">
+      <section className="review-dialog insight-dialog" role="dialog" aria-modal="true" aria-labelledby="anomaly-dialog-title">
+        <div className="review-dialog-head">
+          <div><span className="overline">ANOMALY CANDIDATES</span><h2 id="anomaly-dialog-title">Transactions worth checking</h2></div>
+          <button autoFocus onClick={onClose} aria-label="Close anomaly details"><X /></button>
+        </div>
+        <p className="dialog-intro">These are not automatically wrong. FinSim is surfacing charges that are large, unusual, recurring or category uncertain so you can review them quickly.</p>
+        <div className="dialog-list">
+          {rows.length ? rows.map((item) => <div className="dialog-row" key={item.transaction_id}>
+            <span className={`severity-dot ${item.severity}`}/>
+            <div><strong>{item.merchant}</strong><small>{item.reason} · {item.category} · {item.posted_at ? formatMonthLabel(item.posted_at.slice(0, 7)) : 'Latest data'}</small></div>
+            <b>{formatMoney(item.amount)}</b>
+          </div>) : <div className="dialog-row"><span className="severity-dot low"/><div><strong>No unusual activity found</strong><small>FinSim did not find anomaly candidates in this data set.</small></div><b>$0</b></div>}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function InsightDialog({ snapshot, trend, onClose }: { snapshot: AnalyticsSnapshot; trend: ReturnType<typeof topTrend>; onClose: () => void }) {
+  const current = latestMonth(snapshot)
+  const topCategory = monthCategoryRows(snapshot)[0]
+  return (
+    <div className="review-backdrop" role="presentation">
+      <section className="review-dialog insight-dialog" role="dialog" aria-modal="true" aria-labelledby="insight-dialog-title">
+        <div className="review-dialog-head">
+          <div><span className="overline">FINSIM INSIGHT</span><h2 id="insight-dialog-title">What changed this month</h2></div>
+          <button autoFocus onClick={onClose} aria-label="Close insight"><X /></button>
+        </div>
+        <div className="insight-summary-grid">
+          <div><span>Total spending</span><strong>{formatMoney(current.spending)}</strong><small>{formatMonthLabel(current.month)}</small></div>
+          <div><span>Largest category</span><strong>{topCategory?.name || 'Not available'}</strong><small>{topCategory?.amount || '$0'}</small></div>
+          <div><span>Trend signal</span><strong>{trend ? `${trend.direction}` : 'flat'}</strong><small>{trend ? `${trend.category} changed by ${formatMoney(trend.change_amount)}` : 'No strong movement detected'}</small></div>
+        </div>
+        <p className="dialog-intro">Use this as a starting point. The detailed sections below show the spending mix, anomalies and recent transactions behind this summary.</p>
+      </section>
+    </div>
+  )
+}
+
 const typeWords = ['clear.', 'predictable.', 'simpler.']
 
 function Logo({ compact = false }: { compact?: boolean }) {
@@ -160,8 +191,7 @@ function PublicNav({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme)
         <nav className={open ? 'public-links open' : 'public-links'} aria-label="Main navigation">
           <a href="/#how-it-works" onClick={() => setOpen(false)}>How it works</a>
           <a href="/#features" onClick={() => setOpen(false)}>Features</a>
-          <a href="/#security" onClick={() => setOpen(false)}>Security</a>
-          <Link to="/dashboard" onClick={() => setOpen(false)}>Open app</Link>
+          <Link to="/statements" onClick={() => setOpen(false)}>Open app</Link>
         </nav>
         <div className="nav-actions">
           <ThemeButton theme={theme} setTheme={setTheme} />
@@ -183,12 +213,11 @@ function HeroDemo() {
       <div className="hero-demo">
         <div className="demo-topbar">
           <span className="demo-logo"><span className="logo-mark tiny"><i /><i /><i /></span> FinSim.</span>
-          <span className="demo-search"><Search size={12} /> Search your finances</span>
           <span className="demo-avatar">FS</span>
         </div>
         <div className="demo-body">
           <aside className="demo-sidebar">
-            <span className="active"><LayoutDashboard /> Overview</span>
+            <span className="active"><FileText /> Statements</span>
             <span><BarChart3 /> Analytics</span>
             <span><BrainCircuit /> Forecast</span>
             <span><Settings /> Settings</span>
@@ -258,7 +287,7 @@ function Landing({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) =
         <section className="features section-pad" id="features">
           <div className="section-heading left"><span className="overline">CLARITY THAT COMPOUNDS</span><h2>Less spreadsheet.<br/>More headspace.</h2></div>
           <div className="feature-bento">
-            <article className="feature-large"><div className="feature-copy"><span className="feature-icon"><Gauge /></span><h3>One calm financial home</h3><p>Cash flow, spending, savings and recent activity are organized into a dashboard you can actually read.</p><Link to="/dashboard">Explore the dashboard <ArrowRight size={15} /></Link></div><div className="bento-ui"><div className="bento-balance"><small>AVAILABLE BALANCE</small><strong>$6,482.19</strong><span>Across 2 accounts</span></div><div className="ring"><div><strong>68%</strong><small>of monthly plan</small></div></div></div></article>
+            <article className="feature-large"><div className="feature-copy"><span className="feature-icon"><Gauge /></span><h3>One calm financial home</h3><p>Cash flow, spending, savings and recent activity are organized into an insights page you can actually read.</p><Link to="/analytics">Explore insights <ArrowRight size={15} /></Link></div><div className="bento-ui"><div className="bento-balance"><small>AVAILABLE BALANCE</small><strong>$6,482.19</strong><span>Across 2 accounts</span></div><div className="ring"><div><strong>68%</strong><small>of monthly plan</small></div></div></div></article>
             <article><span className="feature-icon blue"><BrainCircuit /></span><h3>A forecast you can shape</h3><p>Adjust rent, groceries or goals and immediately see the range of likely outcomes.</p><div className="slider-mock"><span><i>Dining</i><b>$340</b></span><input type="range" value="62" readOnly /><span><i>Expected range</i><b>$2.3k to $2.7k</b></span></div></article>
             <article><span className="feature-icon amber"><Bell /></span><h3>Quietly watching for the unusual</h3><p>Duplicate charges, spending spikes and surprising subscriptions rise to the surface.</p><div className="alert-mock"><span>!</span><div><strong>Unusual charge</strong><small>$129.00 · Streaming</small></div><ChevronRight /></div></article>
             <article className="security-card" id="security"><span className="feature-icon green"><ShieldCheck /></span><h3>Privacy is part of the workflow</h3><p>FinSim uses account-scoped jobs, PDF checks, short-lived processing files and no bank credential access.</p><div className="security-points"><span><Check /> Authenticated uploads</span><span><Check /> No bank credentials</span><span><Check /> Private local data</span></div></article>
@@ -268,7 +297,7 @@ function Landing({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) =
 
         <section className="cta section-pad"><div className="cta-card"><span className="cta-orb"/><span className="overline">YOUR NEXT MONTH STARTS HERE</span><h2>Money feels lighter<br/>when it makes sense.</h2><p>Bring three statements. We'll bring the perspective.</p><Link className="button button-white" to="/signup">Build my financial picture <ArrowRight /></Link></div></section>
       </main>
-      <footer><div className="footer-main"><Logo /><p>Finance, simplified.<br/>Decisions, clarified.</p><div><strong>Product</strong><a href="/#features">Features</a><Link to="/dashboard">Dashboard</Link><a href="/#security">Security</a></div><div><strong>Workflow</strong><a href="/#how-it-works">How it works</a><Link to="/statements">Upload statements</Link></div></div><div className="footer-bottom"><span>© 2026 FinSim.</span><span>Statement analytics workspace</span></div></footer>
+      <footer><div className="footer-main"><Logo /><p>Finance, simplified.<br/>Decisions, clarified.</p><div><strong>Product</strong><a href="/#features">Features</a><Link to="/analytics">Insights</Link><Link to="/forecast">Forecast</Link></div><div><strong>Workflow</strong><a href="/#how-it-works">How it works</a><Link to="/statements">Upload statements</Link></div></div><div className="footer-bottom"><span>© 2026 FinSim.</span><span>Statement analytics workspace</span></div></footer>
     </div>
   )
 }
@@ -285,10 +314,9 @@ function AppShell({ children, theme, setTheme }: { children: ReactNode; theme: T
     .map((part) => part[0]?.toUpperCase())
     .join('') || 'M'
   const nav = [
-    { to: '/dashboard', label: 'Overview', icon: LayoutDashboard },
-    { to: '/analytics', label: 'Analytics', icon: BarChart3 },
-    { to: '/forecast', label: 'Forecast', icon: BrainCircuit },
     { to: '/statements', label: 'Statements', icon: FileText },
+    { to: '/analytics', label: 'Insights', icon: BarChart3 },
+    { to: '/forecast', label: 'Forecast', icon: BrainCircuit },
   ]
   useEffect(() => onSessionChange(() => setUser(getStoredUser())), [])
   async function handleSignout() {
@@ -304,7 +332,6 @@ function AppShell({ children, theme, setTheme }: { children: ReactNode; theme: T
           {nav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} onClick={() => setMobileOpen(false)}><Icon size={18} />{label}</NavLink>)}
           <span className="nav-label second">ACCOUNT</span>
           <NavLink to="/settings" onClick={() => setMobileOpen(false)}><Settings size={18} />Settings</NavLink>
-          <a href="/#how-it-works"><CircleHelp size={18} />How it works</a>
         </nav>
         <div className="side-card"><span><Sparkles size={14} /></span><strong>FinSim insight</strong><p>{user ? 'Your saved account analytics refresh after each completed upload.' : 'Sign in to save processing results to your workspace.'}</p><Link to="/forecast">See forecast <ArrowRight size={13}/></Link></div>
         <div className="side-profile"><span>{initials}</span><div><strong>{user?.full_name || 'Guest'}</strong><small>{user ? 'Personal workspace' : 'Sample workspace'}</small></div>{user ? <button className="profile-action" onClick={handleSignout} type="button">Sign out</button> : <MoreHorizontal />}</div>
@@ -312,8 +339,8 @@ function AppShell({ children, theme, setTheme }: { children: ReactNode; theme: T
       <div className="app-main">
         <header className="app-topbar">
           <button className="mobile-menu app-menu" onClick={() => setMobileOpen(!mobileOpen)}><Menu /></button>
-          <div className="breadcrumbs"><span>FinSim</span><ChevronRight size={13}/><strong>{location.pathname.slice(1) || 'Overview'}</strong><span className="demo-badge">{user ? 'Account workspace' : 'Example data'}</span></div>
-          <div className="top-actions"><Link className="search-button" to="/analytics"><Search size={16}/><span>Search insights</span><kbd>⌘ K</kbd></Link><ThemeButton theme={theme} setTheme={setTheme}/><Link className="icon-button notification" to="/analytics#anomalies" aria-label="View anomaly candidates"><Bell size={18}/><i /></Link><Link className="avatar" to="/settings" aria-label="Open settings">{initials}</Link></div>
+          <div className="breadcrumbs"><span>FinSim</span><ChevronRight size={13}/><strong>{location.pathname.slice(1) || 'Statements'}</strong><span className="demo-badge">{user ? 'Account workspace' : 'Example data'}</span></div>
+          <div className="top-actions"><ThemeButton theme={theme} setTheme={setTheme}/><Link className="avatar" to="/settings" aria-label="Open settings">{initials}</Link></div>
         </header>
         <main className="page-content">{children}</main>
       </div>
@@ -325,8 +352,9 @@ function PageHeader({ eyebrow, title, children }: { eyebrow: string; title: stri
   return <div className="page-header"><div><span className="page-eyebrow">{eyebrow}</span><h1>{title}</h1></div>{children}</div>
 }
 
-function MetricCard({ label, value, detail, trend, down, icon: Icon, to }: { label: string; value: string; detail: string; trend?: string; down?: boolean; icon: typeof WalletCards; to?: string }) {
-  const content = <><div className="metric-top"><span className="metric-icon"><Icon /></span><span className="metric-menu">{to ? <ArrowRight /> : <MoreHorizontal />}</span></div><span className="metric-label">{label}</span><strong>{value}</strong><div className={down ? 'metric-detail down' : 'metric-detail'}>{trend && <span>{down ? <ArrowDownRight/> : <ArrowUpRight/>}{trend}</span>}<small>{detail}</small></div></>
+function MetricCard({ label, value, detail, trend, down, icon: Icon, to, onClick }: { label: string; value: string; detail: string; trend?: string; down?: boolean; icon: LucideIcon; to?: string; onClick?: () => void }) {
+  const content = <><div className="metric-top"><span className="metric-icon"><Icon /></span><span className="metric-menu">{to || onClick ? <ArrowRight /> : <MoreHorizontal />}</span></div><span className="metric-label">{label}</span><strong>{value}</strong><div className={down ? 'metric-detail down' : 'metric-detail'}>{trend && <span>{down ? <ArrowDownRight/> : <ArrowUpRight/>}{trend}</span>}<small>{detail}</small></div></>
+  if (onClick) return <button className="metric-card metric-card-link" type="button" onClick={onClick}>{content}</button>
   return to ? <Link className="metric-card metric-card-link" to={to}>{content}</Link> : <article className="metric-card">{content}</article>
 }
 
@@ -337,32 +365,13 @@ function SpendingChart({ forecast = false }: { forecast?: boolean }) {
 }
 
 function Dashboard() {
-  const snapshot = useAnalyticsSnapshot()
-  if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
-    return <>
-      <PageHeader eyebrow="GET STARTED" title="Your workspace is ready."><Link className="button button-primary button-compact" to="/statements"><Upload size={16}/> Add statements</Link></PageHeader>
-      <EmptyWorkspace title="Upload statements to build your dashboard." message="A new account starts empty. Add at least three consecutive monthly statements and FinSim will create your cash flow, spending, categories, anomalies and forecast." />
-      <div className="metric-grid"><MetricCard label="STATEMENTS" value="0" detail="upload three months to begin" icon={FileText} to="/statements"/><MetricCard label="TRANSACTIONS" value="0" detail="waiting for processed data" icon={ReceiptText} to="/statements"/><MetricCard label="ANALYTICS" value="Ready" detail="created after upload" icon={BarChart3} to="/analytics"/><MetricCard label="FORECAST" value="Pending" detail="needs statement history" icon={BrainCircuit} to="/forecast"/></div>
-    </>
-  }
-  const current = latestMonth(snapshot)
-  const previous = previousMonth(snapshot)
-  const rows = monthCategoryRows(snapshot)
-  const recent = transactionPreview(snapshot)
-  const spendChange = monthlyChange(current.spending, previous.spending)
-  const spendDown = Number(current.spending) <= Number(previous.spending)
-  const savings = Number(current.income) - Number(current.spending)
-  return <>
-    <PageHeader eyebrow={sourceLabel(snapshot).toUpperCase()} title="Your money, in focus."><Link className="button button-primary button-compact" to="/statements"><Upload size={16}/> Add statements</Link></PageHeader>
-    <div className="health-banner"><div className="health-score"><span>{Math.max(20, Math.min(95, Math.round((savings / Math.max(Number(current.income), 1)) * 100 + 45)))}</span></div><div><span className="overline">FINANCIAL HEALTH</span><strong>{savings >= 0 ? 'You are building steady momentum.' : 'Spending is running ahead of income.'}</strong><p>{snapshot.source === 'saved-account' ? `Based on ${snapshot.transactionCount} saved transactions in your account.` : snapshot.source === 'local-processing' ? `Based on ${snapshot.transactionCount} processed transactions from your latest upload.` : 'Upload statements to replace this example with your own analytics.'}</p></div><Link to="/analytics">View full analysis <ArrowRight size={15}/></Link></div>
-    <div className="metric-grid"><MetricCard label="NET CASH FLOW" value={formatMoney(current.net_cash_flow)} detail={`for ${formatMonthLabel(current.month)}`} icon={WalletCards}/><MetricCard label="SPENT THIS MONTH" value={formatMoney(current.spending)} trend={spendChange} detail={spendDown ? 'less than previous month' : 'more than previous month'} down={spendDown} icon={CreditCard}/><MetricCard label="SMART SAVINGS" value={formatMoney(Math.max(savings, 0))} detail={savings >= 0 ? 'income left after spending' : 'negative cash flow'} icon={PiggyBank}/><MetricCard label="ANOMALIES" value={String(snapshot.analytics.anomaly_candidates.length)} detail="items worth checking" icon={ReceiptText} to="/analytics#anomalies"/></div>
-    <div className="dashboard-grid"><article className="panel chart-panel"><div className="panel-head"><div><span className="overline">SPENDING PULSE</span><h2>{formatMoney(current.spending)} <small>{formatMonthLabel(current.month)}</small></h2></div><select aria-label="Chart period"><option>Last 3 months</option><option>Latest upload</option></select></div><SpendingChart/></article><article className="panel category-panel"><div className="panel-head"><div><span className="overline">WHERE IT WENT</span><h2>By category</h2></div><Link to="/analytics">Details <ArrowRight size={14}/></Link></div><div className="donut" style={{background: 'conic-gradient(#101418 0 38%, #2f72ff 38% 62%, #8aaeff 62% 78%, #b9ceff 78% 90%, #e5ebf7 90%)'}}><div><strong>{formatMoney(current.spending)}</strong><small>total</small></div></div><div className="category-list">{rows.slice(0,4).map((item)=><div key={item.name}><span><i style={{background:item.color}}/>{item.name}</span><strong>{item.amount}</strong></div>)}</div></article></div>
-    <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions</h2></div><Link to="/analytics">View all <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
-  </>
+  return <Navigate to="/statements" replace />
 }
 
 function Analytics() {
   const snapshot = useAnalyticsSnapshot()
+  const [anomalyDialogOpen, setAnomalyDialogOpen] = useState(false)
+  const [insightDialogOpen, setInsightDialogOpen] = useState(false)
   if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
     return <>
       <PageHeader eyebrow="DETAILED ANALYSIS" title="No analysis yet."/>
@@ -375,14 +384,18 @@ function Analytics() {
   const largest = rows[0] || categories[0]
   const dailySpend = Number(current.spending) / Math.max(1, current.transaction_count)
   const anomalyCount = snapshot.analytics.anomaly_candidates.length
+  const recent = transactionPreview(snapshot)
   const patterns = snapshot.analytics.anomaly_candidates.length
     ? snapshot.analytics.anomaly_candidates.slice(0, 3)
     : [{ transaction_id: 'no-anomalies', posted_at: '', merchant: 'No unusual activity', category: 'Checks', amount: '0.00', reason: 'FinSim did not find obvious anomaly candidates in this run.', severity: 'low' as const }]
   return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact">{formatMonthLabel(current.month)} <ChevronRight size={15}/></button></PageHeader>
-    <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button>Explore insight <ArrowRight/></button></div>
-    <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALY CANDIDATES" value={String(anomalyCount)} detail="open the transaction list below" icon={ReceiptText} to="#anomalies"/></div>
+    <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
+    <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALY CANDIDATES" value={String(anomalyCount)} detail="open transaction review" icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
     <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>Spending trajectory</h2></div><div className="legend"><span><i/>This month</span><span><i/>Previous month</span></div></div><SpendingChart/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.min(100, c.value)}%`,background:c.color}}/></div><small>{c.value.toFixed(0)}%</small></div>)}</article></div>
-    <article className="panel" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Worth your attention</h2></div></div><div className="pattern-grid">{patterns.map((item, index)=><div key={item.transaction_id}><span className={index === 0 ? 'pattern-icon warn' : 'pattern-icon blue'}>{index === 0 ? <Bell/> : <Target/>}</span><strong>{item.merchant}</strong><p>{item.reason} · {formatMoney(item.amount)} in {item.category}.</p><small>{item.posted_at ? formatMonthLabel(item.posted_at.slice(0, 7)) : 'Latest data'} · {item.severity || 'normal'} priority</small></div>)}</div></article>
+    <article className="panel" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Worth your attention</h2></div><button type="button" onClick={() => setAnomalyDialogOpen(true)}>Open review <ArrowRight size={14}/></button></div><div className="pattern-grid">{patterns.map((item, index)=><div key={item.transaction_id}><span className={index === 0 ? 'pattern-icon warn' : 'pattern-icon blue'}>{index === 0 ? <Bell/> : <Target/>}</span><strong>{item.merchant}</strong><p>{item.reason} · {formatMoney(item.amount)} in {item.category}.</p><small>{item.posted_at ? formatMonthLabel(item.posted_at.slice(0, 7)) : 'Latest data'} · {item.severity || 'normal'} priority</small></div>)}</div></article>
+    <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions behind the insights</h2></div><Link to="/statements">Upload more <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
+    {insightDialogOpen && <InsightDialog snapshot={snapshot} trend={trend} onClose={() => setInsightDialogOpen(false)} />}
+    {anomalyDialogOpen && <AnomalyDialog items={snapshot.analytics.anomaly_candidates} onClose={() => setAnomalyDialogOpen(false)} />}
   </>
 }
 
@@ -416,14 +429,14 @@ function Statements() {
   return <StatementProcessingWorkspace />
 }
 
-type SettingsSection = 'profile' | 'notifications' | 'security' | 'data'
-
 function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
   const navigate = useNavigate()
   const [user, setUser] = useState(getStoredUser)
-  const [section, setSection] = useState<SettingsSection>('profile')
   const [fullName, setFullName] = useState(user?.full_name || '')
   const [emails, setEmails] = useState(user?.monthly_email ?? true)
+  const [weeklyDigest, setWeeklyDigest] = useState(true)
+  const [spendingAlerts, setSpendingAlerts] = useState(true)
+  const [largeChargeAlerts, setLargeChargeAlerts] = useState(true)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -443,7 +456,7 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
     try {
       const response = await updateAccountSettings({ full_name: fullName, theme, monthly_email: emails })
       setUser(response.user)
-      setMessage('Settings saved.')
+      setMessage('Settings saved. Your workspace preferences are up to date.')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Settings could not be saved.')
     } finally {
@@ -456,22 +469,18 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
     navigate('/signin')
   }
 
-  const navItems: Array<{ id: SettingsSection; label: string; icon: typeof User }> = [
-    { id: 'profile', label: 'Profile', icon: User },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'security', label: 'Privacy & security', icon: ShieldCheck },
-    { id: 'data', label: 'Data & statements', icon: Landmark },
-  ]
+  function clearInsights() {
+    clearCachedAnalytics()
+    setMessage('Local cached insights were cleared. Upload statements again to rebuild them.')
+  }
 
-  return <><PageHeader eyebrow="ACCOUNT" title="Settings."/><div className="settings-layout"><aside className="settings-nav">{navItems.map(({ id, label, icon: Icon }) => <button key={id} className={section === id ? 'active' : ''} onClick={() => setSection(id)}><Icon/>{label}</button>)}</aside><div className="settings-content">
+  return <><PageHeader eyebrow="ACCOUNT" title="Settings."/><div className="settings-content settings-full">
     {message && <div className="auth-status">{message}</div>}
     {error && <div className="auth-error" role="alert">{error}</div>}
-    {section === 'profile' && <section className="panel settings-section"><div className="panel-head"><div><span className="overline">PROFILE</span><h2>Personal information</h2></div></div><div className="profile-row"><span className="profile-avatar">{initials}</span><div><strong>{user?.full_name || 'Local account'}</strong><small>{user?.email || 'Sign in to save account preferences'}</small></div><button className="button button-secondary button-compact" onClick={() => setFullName(user?.full_name || '')}>Reset</button></div><div className="form-grid"><label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name"/></label><label>Email address<input value={user?.email || ''} placeholder="you@example.com" disabled/></label><label>Home currency<select defaultValue="USD"><option>USD, US Dollar</option><option>CAD, Canadian Dollar</option></select></label><label>Time zone<select defaultValue="CT"><option value="CT">Central Time (US)</option><option>Eastern Time (US)</option></select></label></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save changes'}</button></section>}
-    {section === 'notifications' && <section className="panel settings-section"><div><span className="overline">NOTIFICATIONS</span><h2>Updates and reports</h2></div><div className="setting-row"><div><strong>Monthly insights email</strong><small>A summary when your report is ready. Production email delivery is configured during deployment.</small></div><button className={emails?'switch on':'switch'} onClick={()=>setEmails(!emails)} aria-label="Toggle monthly email"><i/></button></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save notification settings'}</button></section>}
-    {section === 'security' && <section className="panel settings-section"><div><span className="overline">PRIVACY & SECURITY</span><h2>Account protection</h2></div><div className="setting-row"><div><strong>Email verification</strong><small>{user?.email_verified ? 'Your local account is verified.' : 'Verify your email before processing statements.'}</small></div><span className="confidence"><ShieldCheck size={14}/>{user?.email_verified ? 'Verified' : 'Needs verification'}</span></div><div className="setting-row"><div><strong>Session</strong><small>Sign out if this is a shared computer.</small></div><button className="button button-secondary button-compact" onClick={signOutFromSettings}>Sign out</button></div></section>}
-    {section === 'data' && <section className="panel settings-section"><div><span className="overline">DATA & STATEMENTS</span><h2>Your financial data</h2></div><div className="setting-row"><div><strong>Statement uploads</strong><small>Add new PDFs or reprocess a corrected set of statements.</small></div><Link className="button button-primary button-compact" to="/statements">Open upload workspace</Link></div><div className="setting-row"><div><strong>Saved analytics</strong><small>Dashboard, analytics and forecast pages refresh after successful processing.</small></div><Link className="button button-secondary button-compact" to="/analytics">View analytics</Link></div><p className="settings-note">Account deletion and raw file retention controls are listed in the deployment checklist before public release.</p></section>}
-    <section className="panel settings-section"><div><span className="overline">APPEARANCE</span><h2>Theme</h2></div><div className="setting-row"><div><strong>Appearance</strong><small>Choose how FinSim looks for you.</small></div><div className="theme-toggle"><button className={theme==='light'?'active':''} onClick={()=>setTheme('light')}><Sun/>Light</button><button className={theme==='dark'?'active':''} onClick={()=>setTheme('dark')}><Moon/>Dark</button></div></div></section>
-  </div></div></>
+    <section className="panel settings-section"><div className="panel-head"><div><span className="overline">PROFILE</span><h2>Personal information</h2></div><button className="button button-secondary button-compact" onClick={() => setFullName(user?.full_name || '')}>Reset</button></div><div className="profile-row"><span className="profile-avatar">{initials}</span><div><strong>{user?.full_name || 'Local account'}</strong><small>{user?.email || 'Sign in to save account preferences'}</small></div><span className="confidence"><User size={14}/>{user ? 'Signed in' : 'Local preview'}</span></div><div className="form-grid"><label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name"/></label><label>Email address<input value={user?.email || ''} placeholder="you@example.com" disabled/></label><label>Home currency<select defaultValue="USD"><option>USD, US Dollar</option><option>CAD, Canadian Dollar</option></select></label><label>Time zone<select defaultValue="CT"><option value="CT">Central Time (US)</option><option>Eastern Time (US)</option><option>Pacific Time (US)</option></select></label></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save profile'}</button></section>
+    <section className="panel settings-section"><div><span className="overline">PREFERENCES</span><h2>Alerts and appearance</h2></div><div className="setting-row"><div><strong>Monthly insights email</strong><small>A summary when a new report is ready.</small></div><button className={emails?'switch on':'switch'} onClick={()=>setEmails(!emails)} aria-label="Toggle monthly email"><i/></button></div><div className="setting-row"><div><strong>Weekly digest</strong><small>Helpful spending highlights without opening the app.</small></div><button className={weeklyDigest?'switch on':'switch'} onClick={()=>setWeeklyDigest(!weeklyDigest)} aria-label="Toggle weekly digest"><i/></button></div><div className="setting-row"><div><strong>Spending spike alerts</strong><small>Flag a category when it moves sharply from your normal pattern.</small></div><button className={spendingAlerts?'switch on':'switch'} onClick={()=>setSpendingAlerts(!spendingAlerts)} aria-label="Toggle spending alerts"><i/></button></div><div className="setting-row"><div><strong>Large charge alerts</strong><small>Surface unusually large transactions in Analytics.</small></div><button className={largeChargeAlerts?'switch on':'switch'} onClick={()=>setLargeChargeAlerts(!largeChargeAlerts)} aria-label="Toggle large charge alerts"><i/></button></div><div className="setting-row"><div><strong>Appearance</strong><small>Choose how FinSim looks for you.</small></div><div className="theme-toggle"><button className={theme==='light'?'active':''} onClick={()=>setTheme('light')}><Sun/>Light</button><button className={theme==='dark'?'active':''} onClick={()=>setTheme('dark')}><Moon/>Dark</button></div></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save preferences'}</button></section>
+    <section className="panel settings-section"><div><span className="overline">PRIVACY</span><h2>Account and data controls</h2></div><div className="setting-row"><div><strong>Email verification</strong><small>{user?.email_verified ? 'Your account email is verified.' : 'Verify your email before processing statements.'}</small></div><span className="confidence"><ShieldCheck size={14}/>{user?.email_verified ? 'Verified' : 'Needs verification'}</span></div><div className="setting-row"><div><strong>Statement uploads</strong><small>Add PDFs or reprocess corrected files from the upload workspace.</small></div><Link className="button button-primary button-compact" to="/statements">Open upload workspace</Link></div><div className="setting-row"><div><strong>Cached insights</strong><small>Clear the local analytics snapshot stored in this browser.</small></div><button className="button button-secondary button-compact" onClick={clearInsights}>Clear local cache</button></div><div className="setting-row"><div><strong>Session</strong><small>Sign out if this is a shared computer.</small></div><button className="button button-secondary button-compact" onClick={signOutFromSettings}>Sign out</button></div><p className="settings-note">FinSim does not ask for bank credentials. Public deployment should keep uploaded files in private storage with short retention and database access limited to the app service account.</p></section>
+  </div></>
 }
 
 function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
@@ -497,7 +506,7 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
         setStatusMessage('Account created. Use the local verification token below to verify the email.')
       } else {
         await signin(email, password)
-        navigate('/dashboard')
+        navigate('/statements')
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The account request could not be completed.')
@@ -520,7 +529,7 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
     }
   }
 
-  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit}><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify it, then upload your first three statements.':'Sign in with your verified account.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember me</label><a href="#">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} /></label>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and upload statements'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Sign in'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Your dashboard appears after statement processing.</small>}</form></main></div>
+  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit}><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify it, then upload your first three statements.':'Sign in with your verified account.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember me</label><a href="#">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} /></label>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and upload statements'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Sign in'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Insights appear after statement processing.</small>}</form></main></div>
 }
 
 function NotFound(){return <div className="not-found"><Logo/><span>404</span><h1>That page wandered off.</h1><p>Your finances are still exactly where you left them.</p><Link className="button button-primary" to="/">Back home</Link></div>}

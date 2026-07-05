@@ -188,6 +188,11 @@ export function saveProcessingResult(result: ProcessingResult) {
   window.dispatchEvent(new Event(updateEvent))
 }
 
+export function clearCachedAnalytics() {
+  localStorage.removeItem(storageKey)
+  window.dispatchEvent(new Event(updateEvent))
+}
+
 export async function refreshSavedAccountAnalytics() {
   const snapshot = await loadAccountAnalyticsSnapshot()
   if (!snapshot) return null

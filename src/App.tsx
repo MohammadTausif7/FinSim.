@@ -9,6 +9,8 @@ import {
   latestCategories,
   latestMonth,
   recentTransactions,
+  sampleAnalyticsSnapshot,
+  sourceLabel,
   topTrend,
   useAnalyticsSnapshot,
   type AnomalyCandidate,
@@ -46,6 +48,13 @@ import {
 } from 'lucide-react'
 
 type Theme = 'light' | 'dark'
+type ChartMetric = 'spending' | 'income' | 'net_cash_flow'
+
+const chartMetricLabels: Record<ChartMetric, string> = {
+  spending: 'Spending',
+  income: 'Income',
+  net_cash_flow: 'Net cash flow',
+}
 
 // These records are intentionally fictional. They let us build and review the
 // interface without putting anyone's real financial history in the repository.
@@ -65,7 +74,7 @@ const categories = [
   { name: 'Other', value: 10, amount: '$328', color: '#e5ebf7' },
 ]
 
-const categoryColors = ['#101418', '#2f72ff', '#8aaeff', '#b9ceff', '#e5ebf7', '#75a7ff']
+const categoryColors = ['#2563eb', '#7c3aed', '#059669', '#f97316', '#e11d48', '#0891b2', '#ca8a04', '#64748b']
 const merchantTones = ['green', 'blue', 'lime', 'orange', 'violet']
 
 function categoryColor(index: number) {
@@ -102,6 +111,76 @@ function transactionPreview(snapshot: AnalyticsSnapshot) {
 
 function hasFinancialData(snapshot: AnalyticsSnapshot) {
   return snapshot.transactionCount > 0 && snapshot.analytics.monthly_summaries.length > 0
+}
+
+function monthlySeries(snapshot: AnalyticsSnapshot, metric: ChartMetric, limit: number) {
+  const summaries = snapshot.analytics.monthly_summaries.length
+    ? snapshot.analytics.monthly_summaries
+    : sampleAnalyticsSnapshot.analytics.monthly_summaries
+  return summaries.slice(-limit).map((row) => ({
+    month: row.month,
+    label: formatMonthLabel(row.month).slice(0, 3).toUpperCase(),
+    value: Number(row[metric] || 0),
+  }))
+}
+
+function smoothPath(points: Array<{ x: number; y: number }>) {
+  if (!points.length) return ''
+  if (points.length === 1) return `M${points[0].x} ${points[0].y}`
+  return points.reduce((path, point, index) => {
+    if (index === 0) return `M${point.x} ${point.y}`
+    const previous = points[index - 1]
+    const midX = (previous.x + point.x) / 2
+    return `${path} Q${previous.x} ${previous.y} ${midX} ${(previous.y + point.y) / 2} T${point.x} ${point.y}`
+  }, '')
+}
+
+function insightPatterns(snapshot: AnalyticsSnapshot, rows: ReturnType<typeof monthCategoryRows>, trend: ReturnType<typeof topTrend>) {
+  const current = latestMonth(snapshot)
+  const topCategory = rows[0]
+  const netCashFlow = Number(current.net_cash_flow)
+  const income = Math.max(Number(current.income), 1)
+  const savingsRate = Math.round((netCashFlow / income) * 100)
+  const anomalyCount = snapshot.analytics.anomaly_candidates.length
+  const patterns = [
+    {
+      title: topCategory ? `${topCategory.name} drives ${topCategory.value.toFixed(0)}% of spend` : 'Spending mix needs more data',
+      body: topCategory
+        ? `${topCategory.amount} is concentrated in one category. If this is expected, keep it. If not, this is the first place to review.`
+        : 'Upload statements to reveal category concentration.',
+      signal: topCategory && topCategory.value > 45 ? 'High concentration' : 'Balanced mix',
+      icon: Landmark,
+      tone: 'blue',
+    },
+    {
+      title: netCashFlow >= 0 ? `${savingsRate}% of income remained` : `${formatMoney(Math.abs(netCashFlow))} cash flow gap`,
+      body: netCashFlow >= 0
+        ? `Income covered spending for ${formatMonthLabel(current.month)}. This gives the forecast room to plan savings.`
+        : `Spending ran above income this month. Forecast controls can show how much needs to move next month.`,
+      signal: netCashFlow >= 0 ? 'Healthy buffer' : 'Needs attention',
+      icon: Gauge,
+      tone: netCashFlow >= 0 ? 'green' : 'amber',
+    },
+    {
+      title: trend ? `${trend.category} moved ${trend.direction}` : 'Trend movement is still forming',
+      body: trend
+        ? `${trend.category} changed by ${formatMoney(trend.change_amount)} compared with the previous month. Watch if this keeps repeating.`
+        : 'FinSim needs another month of activity before it can show a clear movement pattern.',
+      signal: trend?.change_percent ? `${Math.abs(Number(trend.change_percent)).toFixed(0)}% change` : 'No strong trend',
+      icon: TrendingUp,
+      tone: 'violet',
+    },
+    {
+      title: anomalyCount ? `${anomalyCount} charges deserve review` : 'No obvious anomalies found',
+      body: anomalyCount
+        ? 'Large, unusual or recurring charges are separated from normal spending so review stays focused.'
+        : 'The latest run did not find charges that strongly stand out from the current statement history.',
+      signal: anomalyCount ? 'Review queue' : 'Looks normal',
+      icon: Target,
+      tone: anomalyCount ? 'rose' : 'green',
+    },
+  ]
+  return patterns
 }
 
 function EmptyWorkspace({ title, message }: { title: string; message: string }) {
@@ -358,10 +437,30 @@ function MetricCard({ label, value, detail, trend, down, icon: Icon, to, onClick
   return to ? <Link className="metric-card metric-card-link" to={to}>{content}</Link> : <article className="metric-card">{content}</article>
 }
 
-function SpendingChart({ forecast = false }: { forecast?: boolean }) {
-  // An inline SVG keeps this prototype light. Once the analytics API is wired in,
-  // these paths can be replaced by a chart component fed by real monthly values.
-  return <div className="spending-chart"><svg viewBox="0 0 780 260" preserveAspectRatio="none" role="img" aria-label="Six month spending chart"><defs><linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2f72ff" stopOpacity=".17"/><stop offset="1" stopColor="#2f72ff" stopOpacity="0"/></linearGradient></defs><path className="chart-grid" d="M0 20H780M0 90H780M0 160H780M0 230H780"/><path className="chart-area" d="M0 200 C52 195 74 118 130 140 S207 203 260 134 S350 70 390 110 S475 188 520 113 S613 68 650 87 S726 72 780 44 L780 260 L0 260Z"/><path className="chart-line" d="M0 200 C52 195 74 118 130 140 S207 203 260 134 S350 70 390 110 S475 188 520 113 S613 68 650 87 S726 72 780 44"/>{forecast && <path className="forecast-line" d="M650 87 C700 75 740 96 780 62"/>}<circle cx="650" cy="87" r="5"/></svg><div className="chart-labels"><span>JAN</span><span>FEB</span><span>MAR</span><span>APR</span><span>MAY</span><span>JUN</span></div></div>
+function SpendingChart({ forecast = false, series, metric = 'spending' }: { forecast?: boolean; series?: ReturnType<typeof monthlySeries>; metric?: ChartMetric }) {
+  const data = series?.length ? series : monthlySeries(sampleAnalyticsSnapshot, metric, 6)
+  const [activeIndex, setActiveIndex] = useState(Math.max(0, data.length - 1))
+  const width = 780
+  const height = 260
+  const left = 22
+  const right = 24
+  const top = 30
+  const bottom = 214
+  const values = data.map((point) => point.value)
+  const min = metric === 'net_cash_flow' ? Math.min(0, ...values) : Math.min(...values)
+  const max = Math.max(...values, metric === 'net_cash_flow' ? 0 : 1)
+  const range = max - min || 1
+  const points = data.map((point, index) => ({
+    ...point,
+    x: data.length === 1 ? width / 2 : left + (index * (width - left - right)) / (data.length - 1),
+    y: top + ((max - point.value) / range) * (bottom - top),
+  }))
+  const linePath = smoothPath(points)
+  const areaPath = `${linePath} L${points.at(-1)?.x || width} ${bottom} L${points[0]?.x || left} ${bottom} Z`
+  const active = points[Math.min(activeIndex, points.length - 1)]
+  const previous = points[Math.max(0, activeIndex - 1)]
+  const delta = active && previous ? active.value - previous.value : 0
+  return <div className="spending-chart interactive-chart"><div className="chart-readout"><span>{active?.label || 'NOW'}</span><strong>{formatMoney(active?.value || 0)}</strong><small className={delta >= 0 ? 'up' : 'down'}>{activeIndex > 0 ? `${delta >= 0 ? '+' : ''}${formatMoney(delta)} from previous point` : chartMetricLabels[metric]}</small></div><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${chartMetricLabels[metric]} trend chart`}><defs><linearGradient id={`chartFill-${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".25"/><stop offset="1" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs><path className="chart-grid" d="M22 38H756M22 92H756M22 146H756M22 200H756"/><path className="chart-area" d={areaPath} fill={`url(#chartFill-${metric})`}/><path className="chart-line" d={linePath}/>{forecast && points.at(-1) && <path className="forecast-line" d={`M${points.at(-1)!.x} ${points.at(-1)!.y} C700 75 740 96 780 62`}/>} {points.map((point, index) => <circle key={point.month} cx={point.x} cy={point.y} r={index === activeIndex ? 7 : 4} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex={0} aria-label={`${point.label}: ${formatMoney(point.value)}`}/>)}</svg><div className="chart-labels">{data.map((point)=><span key={point.month}>{point.label}</span>)}</div></div>
 }
 
 function Dashboard() {
@@ -372,6 +471,8 @@ function Analytics() {
   const snapshot = useAnalyticsSnapshot()
   const [anomalyDialogOpen, setAnomalyDialogOpen] = useState(false)
   const [insightDialogOpen, setInsightDialogOpen] = useState(false)
+  const [chartMetric, setChartMetric] = useState<ChartMetric>('spending')
+  const [chartWindow, setChartWindow] = useState(6)
   if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
     return <>
       <PageHeader eyebrow="DETAILED ANALYSIS" title="No analysis yet."/>
@@ -385,14 +486,13 @@ function Analytics() {
   const dailySpend = Number(current.spending) / Math.max(1, current.transaction_count)
   const anomalyCount = snapshot.analytics.anomaly_candidates.length
   const recent = transactionPreview(snapshot)
-  const patterns = snapshot.analytics.anomaly_candidates.length
-    ? snapshot.analytics.anomaly_candidates.slice(0, 3)
-    : [{ transaction_id: 'no-anomalies', posted_at: '', merchant: 'No unusual activity', category: 'Checks', amount: '0.00', reason: 'FinSim did not find obvious anomaly candidates in this run.', severity: 'low' as const }]
+  const patterns = insightPatterns(snapshot, rows, trend)
+  const chartData = monthlySeries(snapshot, chartMetric, chartWindow)
   return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact">{formatMonthLabel(current.month)} <ChevronRight size={15}/></button></PageHeader>
     <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
     <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALY CANDIDATES" value={String(anomalyCount)} detail="open transaction review" icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
-    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>Spending trajectory</h2></div><div className="legend"><span><i/>This month</span><span><i/>Previous month</span></div></div><SpendingChart/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.min(100, c.value)}%`,background:c.color}}/></div><small>{c.value.toFixed(0)}%</small></div>)}</article></div>
-    <article className="panel" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Worth your attention</h2></div><button type="button" onClick={() => setAnomalyDialogOpen(true)}>Open review <ArrowRight size={14}/></button></div><div className="pattern-grid">{patterns.map((item, index)=><div key={item.transaction_id}><span className={index === 0 ? 'pattern-icon warn' : 'pattern-icon blue'}>{index === 0 ? <Bell/> : <Target/>}</span><strong>{item.merchant}</strong><p>{item.reason} · {formatMoney(item.amount)} in {item.category}.</p><small>{item.posted_at ? formatMonthLabel(item.posted_at.slice(0, 7)) : 'Latest data'} · {item.severity || 'normal'} priority</small></div>)}</div></article>
+    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>setChartWindow(Number(event.target.value))} aria-label="Chart period"><option value={3}>Last 3 months</option><option value={6}>Last 6 months</option><option value={12}>Last 12 months</option></select></div></div><SpendingChart series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</article></div>
+    <article className="panel insight-patterns" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Financial signals, not just alerts</h2></div><span className="confidence"><Sparkles size={14}/> {sourceLabel(snapshot)}</span></div><div className="pattern-grid">{patterns.map(({ title, body, signal, icon: Icon, tone })=><div className="pattern-card" key={title}><span className={`pattern-icon ${tone}`}><Icon/></span><strong>{title}</strong><p>{body}</p><small>{signal}</small></div>)}</div></article>
     <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions behind the insights</h2></div><Link to="/statements">Upload more <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
     {insightDialogOpen && <InsightDialog snapshot={snapshot} trend={trend} onClose={() => setInsightDialogOpen(false)} />}
     {anomalyDialogOpen && <AnomalyDialog items={snapshot.analytics.anomaly_candidates} onClose={() => setAnomalyDialogOpen(false)} />}

@@ -150,6 +150,10 @@ function compactMoney(value: number) {
   return formatMoney(value)
 }
 
+function isValidEmail(email: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+}
+
 function analysisPeriodLabel(snapshot: AnalyticsSnapshot) {
   const months = Array.from(new Set(snapshot.analytics.monthly_summaries.map((row) => row.month))).sort()
   if (!months.length) return 'No statement period yet'
@@ -231,7 +235,6 @@ function forecastAccuracyRows(snapshot: AnalyticsSnapshot) {
       }
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row))
-    .slice(-4)
 }
 
 function recurringItems(snapshot: AnalyticsSnapshot) {
@@ -266,7 +269,6 @@ function recurringItems(snapshot: AnalyticsSnapshot) {
     })
     .filter((group) => group.isLikelyRecurring)
     .sort((a, b) => b.monthCount - a.monthCount || b.average - a.average)
-    .slice(0, 5)
 }
 
 function anomalyReviewKey(snapshot: AnalyticsSnapshot) {
@@ -659,12 +661,12 @@ function SpendingChart({ forecast = false, series, metric = 'spending' }: { fore
 function ForecastAccuracyPanel({ snapshot }: { snapshot: AnalyticsSnapshot }) {
   const rows = forecastAccuracyRows(snapshot)
   const latest = rows.at(-1)
-  return <article className="panel insight-mini-panel accuracy-panel"><div className="panel-head"><div><span className="overline">FORECAST ACCURACY</span><h2>{latest ? `${Math.round(latest.accuracy)}% accurate for ${formatMonthLabel(latest.month)}` : 'Learning from each month'}</h2></div><span className="confidence"><Gauge size={14}/> actuals</span></div>{latest ? <><div className="accuracy-main"><div><span>Predicted</span><strong>{formatMoney(latest.expected)}</strong></div><div><span>Actual</span><strong>{formatMoney(latest.actual)}</strong></div><div><span>Difference</span><strong className={latest.error > 0 ? 'over' : 'under'}>{latest.error >= 0 ? '+' : ''}{formatMoney(latest.error)}</strong></div></div><div className="accuracy-history">{rows.map((row)=><span key={row.month} title={`${formatMonthLabel(row.month)} forecast accuracy`}><i style={{ height: `${Math.max(10, Math.min(100, row.accuracy))}%` }}/><b>{formatMonthLabel(row.month).slice(0,3)}</b></span>)}</div></> : <p className="panel-empty-copy">Once the next real month is uploaded, FinSim compares the prior forecast with actual spending and shows the error here.</p>}</article>
+  return <article className="panel insight-mini-panel accuracy-panel"><div className="panel-head"><div><span className="overline">FORECAST ACCURACY</span><h2>{latest ? `${Math.round(latest.accuracy)}% accurate for ${formatMonthLabel(latest.month)}` : 'Learning from each month'}</h2></div><span className="confidence"><Gauge size={14}/> actuals</span></div>{latest ? <div className="panel-scroll accuracy-scroll"><div className="accuracy-main"><div><span>Predicted</span><strong>{formatMoney(latest.expected)}</strong></div><div><span>Actual</span><strong>{formatMoney(latest.actual)}</strong></div><div><span>Difference</span><strong className={latest.error > 0 ? 'over' : 'under'}>{latest.error >= 0 ? '+' : ''}{formatMoney(latest.error)}</strong></div></div><div className="accuracy-history">{rows.map((row)=><span key={row.month} title={`${formatMonthLabel(row.month)} forecast accuracy`}><i style={{ height: `${Math.max(10, Math.min(100, row.accuracy))}%` }}/><b>{formatMonthLabel(row.month).slice(0,3)}</b></span>)}</div><div className="accuracy-list">{rows.slice().reverse().map((row)=><div key={`row-${row.month}`}><span>{formatMonthLabel(row.month)}</span><strong>{Math.round(row.accuracy)}%</strong><small>{row.error >= 0 ? '+' : ''}{formatMoney(row.error)} difference</small></div>)}</div></div> : <p className="panel-empty-copy">Once the next real month is uploaded, FinSim compares the prior forecast with actual spending and shows the error here.</p>}</article>
 }
 
 function RecurringPanel({ snapshot }: { snapshot: AnalyticsSnapshot }) {
   const items = recurringItems(snapshot)
-  return <article className="panel insight-mini-panel recurring-panel"><div className="panel-head"><div><span className="overline">RECURRING MONEY</span><h2>Bills and subscriptions</h2></div><span className="confidence"><ReceiptText size={14}/> {items.length} found</span></div><div className="recurring-list">{items.length ? items.map((item)=><div key={`${item.merchant}-${item.category}`}><span><strong>{item.merchant}</strong><small>{item.category} · {item.cadence}</small></span><b>{formatMoney(item.average)}</b></div>) : <p className="panel-empty-copy">No repeating merchants are visible yet. More months will improve subscription and bill detection.</p>}</div></article>
+  return <article className="panel insight-mini-panel recurring-panel"><div className="panel-head"><div><span className="overline">RECURRING MONEY</span><h2>Bills and subscriptions</h2></div><span className="confidence"><ReceiptText size={14}/> {items.length} found</span></div><div className="recurring-list panel-scroll">{items.length ? items.map((item)=><div key={`${item.merchant}-${item.category}`}><span><strong>{item.merchant}</strong><small>{item.category} · {item.cadence}</small></span><b>{formatMoney(item.average)}</b></div>) : <p className="panel-empty-copy">No repeating merchants are visible yet. More months will improve subscription and bill detection.</p>}</div></article>
 }
 
 function BudgetTargetsPanel({ snapshot, rows }: { snapshot: AnalyticsSnapshot; rows: ReturnType<typeof monthCategoryRows> }) {
@@ -678,11 +680,12 @@ function BudgetTargetsPanel({ snapshot, rows }: { snapshot: AnalyticsSnapshot; r
     return Math.round(targets[row.name] ?? Math.max(Number(row.amount.replace(/[$,]/g, '')) * 1.1, 100))
   }
   function updateTarget(category: string, value: number) {
-    const next = { ...targets, [category]: Math.max(0, Math.round(value || 0)) }
+    const safeValue = Number.isFinite(value) ? Math.max(0, Math.min(999999, Math.round(value))) : 0
+    const next = { ...targets, [category]: safeValue }
     saveBudgetTargets(key, next)
     setVersion((current) => current + 1)
   }
-  return <article className="panel budget-panel"><div className="panel-head"><div><span className="overline">BUDGET TARGETS</span><h2>Set category limits</h2></div><span className="confidence"><Target size={14}/> editable</span></div><div className="budget-list">{rows.slice(0,5).map((row)=>{const spent=Number(row.amount.replace(/[$,]/g,''));const target=targetFor(row);const percent=target ? Math.min(140,(spent/target)*100) : 0;return <div className="budget-row" key={row.name}><div><span><i style={{background:row.color}}/>{row.name}</span><label><b>$</b><input type="number" min={0} value={target} onChange={(event)=>updateTarget(row.name, Number(event.target.value))} aria-label={`${row.name} monthly budget target`}/></label></div><div className="progress"><i style={{width:`${Math.min(100,percent)}%`,background:percent>100?'#e11d48':row.color}}/></div><small>{formatMoney(spent)} spent of {formatMoney(target)} {percent>100?'· over target':'· on watch'}</small></div>})}</div></article>
+  return <article className="panel budget-panel"><div className="panel-head"><div><span className="overline">BUDGET TARGETS</span><h2>Set category limits</h2></div><span className="confidence"><Target size={14}/> editable</span></div><div className="budget-list panel-scroll">{rows.map((row)=>{const spent=Number(row.amount.replace(/[$,]/g,''));const target=targetFor(row);const percent=target ? Math.min(140,(spent/target)*100) : 0;return <div className="budget-row" key={row.name}><div><span><i style={{background:row.color}}/>{row.name}</span><label><b>$</b><input type="number" min={0} max={999999} step={1} inputMode="numeric" value={target} onChange={(event)=>updateTarget(row.name, Number(event.target.value))} onBlur={(event)=>updateTarget(row.name, Number(event.target.value))} aria-label={`${row.name} monthly budget target`}/></label></div><div className="progress"><i style={{width:`${Math.min(100,percent)}%`,background:percent>100?'#e11d48':row.color}}/></div><small>{formatMoney(spent)} spent of {formatMoney(target)} {percent>100?'· over target':'· on watch'}</small></div>})}</div></article>
 }
 
 function Dashboard() {
@@ -720,14 +723,15 @@ function Analytics() {
   const rows = monthCategoryRows(snapshot)
   const trend = topTrend(snapshot)
   const largest = rows[0] || categories[0]
-  const dailySpend = Number(current.spending) / Math.max(1, current.transaction_count)
+  const spendTransactionCount = latestCategories(snapshot).reduce((sum, row) => sum + Number(row.transaction_count || 0), 0)
+  const averagePurchase = Number(current.spending) / Math.max(1, spendTransactionCount || current.transaction_count)
   const anomalyCount = openAnomalies.length
   const recent = transactionPreview(snapshot)
   const patterns = insightPatterns(snapshot, rows, trend, anomalyCount)
   const chartData = monthlySeries(snapshot, chartMetric, chartWindow)
   return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact analysis-period-badge">{analysisPeriodLabel(snapshot)} <ChevronRight size={15}/></button></PageHeader>
     <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
-    <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALIES" value={anomalyCount ? String(anomalyCount) : '0'} detail={anomalyCount ? 'open transaction review' : 'No anomalies, all verified'} icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
+    <div className="metric-grid three"><MetricCard label="AVG PURCHASE" value={formatMoney(averagePurchase)} detail="average outgoing transaction" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALIES" value={anomalyCount ? String(anomalyCount) : '0'} detail={anomalyCount ? 'open transaction review' : 'No anomalies, all verified'} icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
     <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>setChartWindow(Number(event.target.value))} aria-label="Chart period"><option value={3}>Last 3 months</option><option value={6}>Last 6 months</option><option value={12}>Last 12 months</option></select></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</article></div>
     <div className="insight-ops-grid"><ForecastAccuracyPanel snapshot={snapshot}/><RecurringPanel snapshot={snapshot}/><BudgetTargetsPanel snapshot={snapshot} rows={rows}/></div>
     <article className="panel insight-patterns" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Financial signals, not just alerts</h2></div><span className="confidence"><Sparkles size={14}/> {sourceLabel(snapshot)}</span></div><div className="pattern-grid">{patterns.map(({ title, body, signal, icon: Icon, tone })=><div className="pattern-card" key={title}><span className={`pattern-icon ${tone}`}><Icon/></span><strong>{title}</strong><p>{body}</p><small>{signal}</small></div>)}</div></article>
@@ -806,9 +810,16 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
     setSaving(true)
     setMessage('')
     setError('')
+    const cleanedName = fullName.trim().replace(/\s+/g, ' ')
+    if (!cleanedName || cleanedName.length < 2 || cleanedName.length > 80) {
+      setSaving(false)
+      setError('Enter a full name between 2 and 80 characters.')
+      return
+    }
     try {
-      const response = await updateAccountSettings({ full_name: fullName, theme, monthly_email: emails })
+      const response = await updateAccountSettings({ full_name: cleanedName, theme, monthly_email: emails })
       setUser(response.user)
+      setFullName(response.user.full_name)
       setMessage('Settings saved. Your workspace preferences are up to date.')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Settings could not be saved.')
@@ -830,7 +841,7 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
   return <><PageHeader eyebrow="ACCOUNT" title="Settings."/><div className="settings-content settings-full">
     {message && <div className="auth-status">{message}</div>}
     {error && <div className="auth-error" role="alert">{error}</div>}
-    <section className="panel settings-section"><div className="panel-head"><div><span className="overline">PROFILE</span><h2>Personal information</h2></div><button className="button button-secondary button-compact" onClick={() => setFullName(user?.full_name || '')}>Reset</button></div><div className="profile-row"><span className="profile-avatar">{initials}</span><div><strong>{user?.full_name || 'Local account'}</strong><small>{user?.email || 'Sign in to save account preferences'}</small></div><span className="confidence"><User size={14}/>{user ? 'Signed in' : 'Local preview'}</span></div><div className="form-grid"><label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name"/></label><label>Email address<input value={user?.email || ''} placeholder="you@example.com" disabled/></label><label>Home currency<select defaultValue="USD"><option>USD, US Dollar</option><option>CAD, Canadian Dollar</option></select></label><label>Time zone<select defaultValue="CT"><option value="CT">Central Time (US)</option><option>Eastern Time (US)</option><option>Pacific Time (US)</option></select></label></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save profile'}</button></section>
+    <section className="panel settings-section"><div className="panel-head"><div><span className="overline">PROFILE</span><h2>Personal information</h2></div><button className="button button-secondary button-compact" onClick={() => setFullName(user?.full_name || '')}>Reset</button></div><div className="profile-row"><span className="profile-avatar">{initials}</span><div><strong>{user?.full_name || 'Local account'}</strong><small>{user?.email || 'Sign in to save account preferences'}</small></div><span className="confidence"><User size={14}/>{user ? 'Signed in' : 'Local preview'}</span></div><div className="form-grid"><label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name"/></label><label>Email address<input type="email" value={user?.email || ''} placeholder="you@example.com" autoComplete="email" disabled/></label><label>Home currency<select defaultValue="USD"><option>USD, US Dollar</option><option>CAD, Canadian Dollar</option></select></label><label>Time zone<select defaultValue="CT"><option value="CT">Central Time (US)</option><option>Eastern Time (US)</option><option>Pacific Time (US)</option></select></label></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save profile'}</button></section>
     <section className="panel settings-section"><div><span className="overline">PREFERENCES</span><h2>Alerts and appearance</h2></div><div className="setting-row"><div><strong>Monthly insights email</strong><small>A summary when a new report is ready.</small></div><button className={emails?'switch on':'switch'} onClick={()=>setEmails(!emails)} aria-label="Toggle monthly email"><i/></button></div><div className="setting-row"><div><strong>Weekly digest</strong><small>Helpful spending highlights without opening the app.</small></div><button className={weeklyDigest?'switch on':'switch'} onClick={()=>setWeeklyDigest(!weeklyDigest)} aria-label="Toggle weekly digest"><i/></button></div><div className="setting-row"><div><strong>Spending spike alerts</strong><small>Flag a category when it moves sharply from your normal pattern.</small></div><button className={spendingAlerts?'switch on':'switch'} onClick={()=>setSpendingAlerts(!spendingAlerts)} aria-label="Toggle spending alerts"><i/></button></div><div className="setting-row"><div><strong>Large charge alerts</strong><small>Surface unusually large transactions in Analytics.</small></div><button className={largeChargeAlerts?'switch on':'switch'} onClick={()=>setLargeChargeAlerts(!largeChargeAlerts)} aria-label="Toggle large charge alerts"><i/></button></div><div className="setting-row"><div><strong>Appearance</strong><small>Choose how FinSim looks for you.</small></div><div className="theme-toggle"><button className={theme==='light'?'active':''} onClick={()=>setTheme('light')}><Sun/>Light</button><button className={theme==='dark'?'active':''} onClick={()=>setTheme('dark')}><Moon/>Dark</button></div></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save preferences'}</button></section>
     <section className="panel settings-section"><div><span className="overline">PRIVACY</span><h2>Account and data controls</h2></div><div className="setting-row"><div><strong>Email verification</strong><small>{user?.email_verified ? 'Your account email is verified.' : 'Verify your email before processing statements.'}</small></div><span className="confidence"><ShieldCheck size={14}/>{user?.email_verified ? 'Verified' : 'Needs verification'}</span></div><div className="setting-row"><div><strong>Statement uploads</strong><small>Add PDFs or reprocess corrected files from the upload workspace.</small></div><Link className="button button-primary button-compact" to="/statements">Open upload workspace</Link></div><div className="setting-row"><div><strong>Cached insights</strong><small>Clear the local analytics snapshot stored in this browser.</small></div><button className="button button-secondary button-compact" onClick={clearInsights}>Clear local cache</button></div><div className="setting-row"><div><strong>Session</strong><small>Sign out if this is a shared computer.</small></div><button className="button button-secondary button-compact" onClick={signOutFromSettings}>Sign out</button></div><p className="settings-note">FinSim does not ask for bank credentials. Public deployment should keep uploaded files in private storage with short retention and database access limited to the app service account.</p></section>
   </div></>
@@ -849,16 +860,33 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const cleanedName = fullName.trim().replace(/\s+/g, ' ')
+    const cleanedEmail = email.trim().toLowerCase()
+    if (isSignup && (cleanedName.length < 2 || cleanedName.length > 80)) {
+      setError('Enter a full name between 2 and 80 characters.')
+      return
+    }
+    if (!isValidEmail(cleanedEmail)) {
+      setError('Enter a valid email address.')
+      return
+    }
+    if (password.length < 8 || password.length > 128) {
+      setError('Password must be between 8 and 128 characters.')
+      return
+    }
     setLoading(true)
     setError('')
     setStatusMessage('')
     try {
       if (isSignup) {
-        const result = await signup(fullName, email, password)
+        setFullName(cleanedName)
+        setEmail(cleanedEmail)
+        const result = await signup(cleanedName, cleanedEmail, password)
         setVerificationToken(result.verification_token)
         setStatusMessage('Account created. Use the local verification token below to verify the email.')
       } else {
-        await signin(email, password)
+        setEmail(cleanedEmail)
+        await signin(cleanedEmail, password)
         navigate('/statements')
       }
     } catch (caught) {
@@ -869,11 +897,18 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
   }
 
   async function verifyAndContinue() {
+    const cleanedEmail = email.trim().toLowerCase()
+    const cleanedToken = verificationToken.trim()
+    if (!cleanedToken) {
+      setError('Enter the verification token.')
+      return
+    }
     setLoading(true)
     setError('')
     try {
-      await verifyEmail(verificationToken)
-      await signin(email, password)
+      setVerificationToken(cleanedToken)
+      await verifyEmail(cleanedToken)
+      await signin(cleanedEmail, password)
       navigate('/statements')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Email verification could not be completed.')
@@ -882,7 +917,7 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
     }
   }
 
-  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit}><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify it, then upload your first three statements.':'Sign in with your verified account.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember me</label><a href="#">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} /></label>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and upload statements'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Sign in'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Insights appear after statement processing.</small>}</form></main></div>
+  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit} noValidate><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify it, then upload your first three statements.':'Sign in with your verified account.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" maxLength={254} autoComplete="email" inputMode="email" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} maxLength={128} autoComplete={isSignup ? 'new-password' : 'current-password'} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember me</label><a href="#" onClick={(event)=>event.preventDefault()} aria-disabled="true">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} maxLength={160} autoComplete="one-time-code" /></label>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and upload statements'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Sign in'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Insights appear after statement processing.</small>}</form></main></div>
 }
 
 function NotFound(){return <div className="not-found"><Logo/><span>404</span><h1>That page wandered off.</h1><p>Your finances are still exactly where you left them.</p><Link className="button button-primary" to="/">Back home</Link></div>}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import StatementProcessingWorkspace from './features/statements/StatementProcessingWorkspace'
-import { getStoredUser, onSessionChange, signin, signout, signup, updateAccountSettings, verifyEmail } from './features/account/accountApi'
+import { getStoredUser, onSessionChange, requestSigninCode, signout, signup, updateAccountSettings, verifyEmail, verifySigninCode } from './features/account/accountApi'
 import {
   clearCachedAnalytics,
   formatMoney,
@@ -124,20 +124,25 @@ function addMonths(month: string, offset: number) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
-function monthlySeries(snapshot: AnalyticsSnapshot, metric: ChartMetric, limit: number): MonthlyChartPoint[] {
+function monthlySeries(snapshot: AnalyticsSnapshot, metric: ChartMetric, limit: number, endOffset = 0): MonthlyChartPoint[] {
   const summaries = snapshot.analytics.monthly_summaries.length
     ? snapshot.analytics.monthly_summaries
     : sampleAnalyticsSnapshot.analytics.monthly_summaries
   const byMonth = new Map(summaries.map((row) => [row.month, Number(row[metric] || 0)]))
   const latest = summaries.at(-1)?.month || sampleAnalyticsSnapshot.analytics.monthly_summaries.at(-1)!.month
+  const endMonth = addMonths(latest, endOffset)
   return Array.from({ length: limit }, (_, index) => {
-    const month = addMonths(latest, index - limit + 1)
+    const month = addMonths(endMonth, index - limit + 1)
     return {
       month,
       label: formatMonthLabel(month).slice(0, 3).toUpperCase(),
       value: byMonth.get(month) ?? null,
     }
   })
+}
+
+function compareMonths(left: string, right: string) {
+  return left.localeCompare(right)
 }
 
 function nextMonth(month: string) {
@@ -655,7 +660,7 @@ function SpendingChart({ forecast = false, series, metric = 'spending' }: { fore
   const previousValue = previous?.value
   const delta = activeValue !== null && activeValue !== undefined && previousValue !== null && previousValue !== undefined ? activeValue - previousValue : 0
   const yTicks = [max, min + range / 2, min]
-  return <div className="spending-chart interactive-chart"><div className="chart-readout"><span>{active?.label || 'NOW'}</span><strong>{active?.value === null ? 'No data' : formatMoney(active?.value || 0)}</strong><small className={delta >= 0 ? 'up' : 'down'}>{active?.value === null ? 'No statement for this month' : activeIndex > 0 && previous ? `${delta >= 0 ? '+' : ''}${formatMoney(delta)} from previous point` : chartMetricLabels[metric]}</small></div><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${chartMetricLabels[metric]} trend chart`}><defs><linearGradient id={`chartFill-${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".25"/><stop offset="1" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs>{yTicks.map((tick, index) => <g key={index}><text className="chart-y-label" x="0" y={top + index * ((bottom - top) / 2) + 4}>{compactMoney(tick)}</text><path className="chart-grid" d={`M${left} ${top + index * ((bottom - top) / 2)}H756`}/></g>)}{areaPath && <path className="chart-area" d={areaPath} fill={`url(#chartFill-${metric})`}/>}<path className="chart-line" d={linePath}/>{forecast && actualPoints.at(-1) && <path className="forecast-line" d={`M${actualPoints.at(-1)!.x} ${actualPoints.at(-1)!.y} C700 75 740 96 780 62`}/>} {points.map((point, index) => point.value === null || point.y === null ? <circle key={point.month} className="chart-empty-point" cx={point.x} cy={bottom} r="3" /> : <circle key={point.month} cx={point.x} cy={point.y} r={index === activeIndex ? 7 : 4} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex={0} aria-label={`${point.label}: ${formatMoney(point.value)}`}/>)}</svg><div className="chart-labels">{data.map((point)=><span className={point.value === null ? 'empty' : ''} key={point.month}>{point.label}</span>)}</div></div>
+  return <div className="spending-chart interactive-chart"><div className="chart-readout"><span>{active?.label || 'NOW'}</span><strong>{active?.value === null ? 'No data' : formatMoney(active?.value || 0)}</strong><small className={delta >= 0 ? 'up' : 'down'}>{active?.value === null ? 'No statement for this month' : activeIndex > 0 && previous ? `${delta >= 0 ? '+' : ''}${formatMoney(delta)} from previous point` : chartMetricLabels[metric]}</small></div><p className="chart-help">Hover or tab through points to update this readout.</p><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${chartMetricLabels[metric]} trend chart`}><defs><linearGradient id={`chartFill-${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".25"/><stop offset="1" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs>{yTicks.map((tick, index) => <g key={index}><text className="chart-y-label" x="0" y={top + index * ((bottom - top) / 2) + 4}>{compactMoney(tick)}</text><path className="chart-grid" d={`M${left} ${top + index * ((bottom - top) / 2)}H756`}/></g>)}{areaPath && <path className="chart-area" d={areaPath} fill={`url(#chartFill-${metric})`}/>}<path className="chart-line" d={linePath}/>{forecast && actualPoints.at(-1) && <path className="forecast-line" d={`M${actualPoints.at(-1)!.x} ${actualPoints.at(-1)!.y} C700 75 740 96 780 62`}/>} {points.map((point, index) => point.value === null || point.y === null ? <circle key={point.month} className="chart-empty-point" cx={point.x} cy={bottom} r="3" /> : <circle key={point.month} cx={point.x} cy={point.y} r={index === activeIndex ? 7 : 4} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex={0} aria-label={`${point.label}: ${formatMoney(point.value)}`}/>)}</svg><div className="chart-labels">{data.map((point)=><span className={point.value === null ? 'empty' : ''} key={point.month}>{point.label}</span>)}</div></div>
 }
 
 function ForecastAccuracyPanel({ snapshot }: { snapshot: AnalyticsSnapshot }) {
@@ -698,6 +703,7 @@ function Analytics() {
   const [insightDialogOpen, setInsightDialogOpen] = useState(false)
   const [chartMetric, setChartMetric] = useState<ChartMetric>('spending')
   const [chartWindow, setChartWindow] = useState(6)
+  const [chartOffset, setChartOffset] = useState(0)
   const [anomalyReviewVersion, setAnomalyReviewVersion] = useState(0)
   const anomalyKey = anomalyReviewKey(snapshot)
   const reviewedAnomalies = useMemo(() => {
@@ -728,11 +734,18 @@ function Analytics() {
   const anomalyCount = openAnomalies.length
   const recent = transactionPreview(snapshot)
   const patterns = insightPatterns(snapshot, rows, trend, anomalyCount)
-  const chartData = monthlySeries(snapshot, chartMetric, chartWindow)
+  const chartData = monthlySeries(snapshot, chartMetric, chartWindow, chartOffset)
+  const statementMonths = snapshot.analytics.monthly_summaries.map((row) => row.month).sort()
+  const firstStatementMonth = statementMonths[0]
+  const chartStartMonth = chartData[0]?.month
+  const chartEndMonth = chartData.at(-1)?.month
+  const canMoveBack = Boolean(firstStatementMonth && chartStartMonth && compareMonths(chartStartMonth, firstStatementMonth) > 0)
+  const canMoveForward = chartOffset < 3
+  const chartPeriod = chartStartMonth && chartEndMonth ? `${formatMonthLabel(chartStartMonth)} to ${formatMonthLabel(chartEndMonth)}` : 'No period selected'
   return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact analysis-period-badge">{analysisPeriodLabel(snapshot)} <ChevronRight size={15}/></button></PageHeader>
     <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
     <div className="metric-grid three"><MetricCard label="AVG PURCHASE" value={formatMoney(averagePurchase)} detail="average outgoing transaction" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALIES" value={anomalyCount ? String(anomalyCount) : '0'} detail={anomalyCount ? 'open transaction review' : 'No anomalies, all verified'} icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
-    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>setChartWindow(Number(event.target.value))} aria-label="Chart period"><option value={3}>Last 3 months</option><option value={6}>Last 6 months</option><option value={12}>Last 12 months</option></select></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</article></div>
+    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2><small className="chart-period-label">{chartPeriod}</small></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>{setChartWindow(Number(event.target.value));setChartOffset(0)}} aria-label="Chart period"><option value={3}>3 months</option><option value={6}>6 months</option><option value={12}>12 months</option></select><div className="chart-range-controls" aria-label="Move chart range"><button type="button" onClick={() => setChartOffset((currentOffset) => currentOffset - 1)} disabled={!canMoveBack}>Previous</button><button type="button" onClick={() => setChartOffset(0)} disabled={chartOffset === 0}>Latest</button><button type="button" onClick={() => setChartOffset((currentOffset) => currentOffset + 1)} disabled={!canMoveForward}>Next</button></div></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartOffset}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div><div className="category-scroll">{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</div></article></div>
     <div className="insight-ops-grid"><ForecastAccuracyPanel snapshot={snapshot}/><RecurringPanel snapshot={snapshot}/><BudgetTargetsPanel snapshot={snapshot} rows={rows}/></div>
     <article className="panel insight-patterns" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Financial signals, not just alerts</h2></div><span className="confidence"><Sparkles size={14}/> {sourceLabel(snapshot)}</span></div><div className="pattern-grid">{patterns.map(({ title, body, signal, icon: Icon, tone })=><div className="pattern-card" key={title}><span className={`pattern-icon ${tone}`}><Icon/></span><strong>{title}</strong><p>{body}</p><small>{signal}</small></div>)}</div></article>
     <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions behind the insights</h2></div><Link to="/statements">Upload more <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
@@ -854,12 +867,19 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [verificationToken, setVerificationToken] = useState('')
+  const [loginChallengeId, setLoginChallengeId] = useState('')
+  const [loginCode, setLoginCode] = useState('')
+  const [localLoginCode, setLocalLoginCode] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (loginChallengeId) {
+      await verifyLoginAndContinue()
+      return
+    }
     const cleanedName = fullName.trim().replace(/\s+/g, ' ')
     const cleanedEmail = email.trim().toLowerCase()
     if (isSignup && (cleanedName.length < 2 || cleanedName.length > 80)) {
@@ -877,6 +897,9 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
     setLoading(true)
     setError('')
     setStatusMessage('')
+    setLoginChallengeId('')
+    setLoginCode('')
+    setLocalLoginCode('')
     try {
       if (isSignup) {
         setFullName(cleanedName)
@@ -886,8 +909,10 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
         setStatusMessage('Account created. Use the local verification token below to verify the email.')
       } else {
         setEmail(cleanedEmail)
-        await signin(cleanedEmail, password)
-        navigate('/statements')
+        const result = await requestSigninCode(cleanedEmail, password)
+        setLoginChallengeId(result.login_challenge_id)
+        setLocalLoginCode(result.verification_code)
+        setStatusMessage('A six digit verification code was sent to your email. Use the local code below while testing.')
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The account request could not be completed.')
@@ -906,10 +931,12 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
     setLoading(true)
     setError('')
     try {
-      setVerificationToken(cleanedToken)
       await verifyEmail(cleanedToken)
-      await signin(cleanedEmail, password)
-      navigate('/statements')
+      const result = await requestSigninCode(cleanedEmail, password)
+      setVerificationToken('')
+      setLoginChallengeId(result.login_challenge_id)
+      setLocalLoginCode(result.verification_code)
+      setStatusMessage('Email verified. Enter the six digit login code to open your workspace.')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Email verification could not be completed.')
     } finally {
@@ -917,7 +944,29 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
     }
   }
 
-  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit} noValidate><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify it, then upload your first three statements.':'Sign in with your verified account.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" maxLength={254} autoComplete="email" inputMode="email" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} maxLength={128} autoComplete={isSignup ? 'new-password' : 'current-password'} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember me</label><a href="#" onClick={(event)=>event.preventDefault()} aria-disabled="true">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} maxLength={160} autoComplete="one-time-code" /></label>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and upload statements'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Sign in'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Insights appear after statement processing.</small>}</form></main></div>
+  async function verifyLoginAndContinue() {
+    const cleanedCode = loginCode.trim()
+    if (!loginChallengeId) {
+      setError('Request a login code first.')
+      return
+    }
+    if (!/^\d{6}$/.test(cleanedCode)) {
+      setError('Enter the six digit login code.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    try {
+      await verifySigninCode(loginChallengeId, cleanedCode)
+      navigate('/statements')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Login verification could not be completed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit} noValidate><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify email, then confirm a login code.':'Sign in with your password, then confirm the code sent to your email.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" maxLength={254} autoComplete="email" inputMode="email" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} maxLength={128} autoComplete={isSignup ? 'new-password' : 'current-password'} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember this device</label><a href="#" onClick={(event)=>event.preventDefault()} aria-disabled="true">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} maxLength={160} autoComplete="one-time-code" /></label>}{loginChallengeId&&<><label>Login verification code<input value={loginCode} onChange={(event)=>setLoginCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required/></label>{localLoginCode&&<small className="auth-code-hint">Local test code: <strong>{localLoginCode}</strong></small>}</>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and send login code'} <ArrowRight/></button>:loginChallengeId?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyLoginAndContinue}>{loading?'Checking...':'Verify code and open app'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Send login code'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Insights appear after statement processing.</small>}</form></main></div>
 }
 
 function NotFound(){return <div className="not-found"><Logo/><span>404</span><h1>That page wandered off.</h1><p>Your finances are still exactly where you left them.</p><Link className="button button-primary" to="/">Back home</Link></div>}

@@ -19,6 +19,12 @@ export type SigninResponse = {
   user: AccountUser
 }
 
+export type SigninCodeResponse = {
+  login_challenge_id: string
+  verification_code: string
+  message: string
+}
+
 const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 const sessionKey = 'finsim-session-token'
 const userKey = 'finsim-account-user'
@@ -60,6 +66,24 @@ export async function signin(email: string, password: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
+  })
+  saveSession(response.session_token, response.user)
+  return response
+}
+
+export async function requestSigninCode(email: string, password: string) {
+  return request<SigninCodeResponse>('/api/accounts/signin/request-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export async function verifySigninCode(loginChallengeId: string, code: string) {
+  const response = await request<SigninResponse>('/api/accounts/signin/verify-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login_challenge_id: loginChallengeId, code }),
   })
   saveSession(response.session_token, response.user)
   return response

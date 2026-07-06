@@ -10,13 +10,14 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_DB_PATH = Path("processing_api/data/finsim_local.db")
 PASSWORD_ITERATIONS = 260_000
+LOGIN_CODE_MINUTES = 10
 
 
 class AccountError(ValueError):
@@ -135,14 +136,71 @@ class AccountService:
             if not bool(row["email_verified"]):
                 raise AuthError("Email must be verified before signing in")
 
-            session_token = secrets.token_urlsafe(32)
+            session_token = self._start_session(connection, row["user_id"])
+        return {"session_token": session_token, "user": self._row_to_user(row).as_dict()}
+
+    def request_signin_code(self, email: str, password: str) -> dict[str, object]:
+        normalized_email = _clean_email(email)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE email = ?",
+                (normalized_email,),
+            ).fetchone()
+            if row is None or not hmac.compare_digest(
+                _hash_password(password, row["password_salt"]),
+                row["password_hash"],
+            ):
+                raise AuthError("Email or password is incorrect")
+            if not bool(row["email_verified"]):
+                raise AuthError("Email must be verified before signing in")
+
+            challenge_id = secrets.token_urlsafe(24)
+            code = f"{secrets.randbelow(1_000_000):06d}"
             connection.execute(
                 """
-                INSERT INTO sessions (session_token, user_id, created_at)
-                VALUES (?, ?, ?)
+                INSERT INTO login_challenges (challenge_id, user_id, code_hash, expires_at, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (session_token, row["user_id"], _now()),
+                (
+                    challenge_id,
+                    row["user_id"],
+                    _hash_code(code),
+                    _future(minutes=LOGIN_CODE_MINUTES),
+                    _now(),
+                ),
             )
+        return {
+            "login_challenge_id": challenge_id,
+            "verification_code": code,
+            "message": "Verification code sent to email.",
+        }
+
+    def verify_signin_code(self, challenge_id: str, code: str) -> dict[str, object]:
+        cleaned_challenge = challenge_id.strip()
+        cleaned_code = "".join(character for character in code.strip() if character.isdigit())
+        if not cleaned_challenge or len(cleaned_code) != 6:
+            raise AuthError("A valid six digit verification code is required")
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT login_challenges.*, users.*
+                FROM login_challenges
+                JOIN users ON users.user_id = login_challenges.user_id
+                WHERE login_challenges.challenge_id = ?
+                """,
+                (cleaned_challenge,),
+            ).fetchone()
+            if row is None:
+                raise AuthError("Verification code is invalid or expired")
+            if _parse_time(row["expires_at"]) < datetime.now(timezone.utc):
+                connection.execute("DELETE FROM login_challenges WHERE challenge_id = ?", (cleaned_challenge,))
+                raise AuthError("Verification code is invalid or expired")
+            if not hmac.compare_digest(_hash_code(cleaned_code), row["code_hash"]):
+                raise AuthError("Verification code is incorrect")
+
+            connection.execute("DELETE FROM login_challenges WHERE challenge_id = ?", (cleaned_challenge,))
+            session_token = self._start_session(connection, row["user_id"])
         return {"session_token": session_token, "user": self._row_to_user(row).as_dict()}
 
     def signout(self, session_token: str) -> None:
@@ -227,6 +285,18 @@ class AccountService:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS login_challenges (
+                    challenge_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                )
+                """
+            )
 
     def _get_user_by_id(self, user_id: str) -> AccountUser:
         with self._connect() as connection:
@@ -237,6 +307,17 @@ class AccountService:
         if row is None:
             raise AuthError("Account was not found")
         return self._row_to_user(row)
+
+    def _start_session(self, connection: sqlite3.Connection, user_id: str) -> str:
+        session_token = secrets.token_urlsafe(32)
+        connection.execute(
+            """
+            INSERT INTO sessions (session_token, user_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (session_token, user_id, _now()),
+        )
+        return session_token
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -297,5 +378,18 @@ def _hash_password(password: str, salt: str) -> str:
     return digest.hex()
 
 
+def _hash_code(code: str) -> str:
+    return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _future(*, minutes: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat()
+
+
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)

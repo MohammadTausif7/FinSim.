@@ -45,6 +45,13 @@ class SigninBody(BaseModel):
     password: str
 
 
+class VerifySigninCodeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login_challenge_id: str = Field(min_length=1)
+    code: str = Field(min_length=6, max_length=12)
+
+
 class VerifyEmailBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -106,6 +113,20 @@ def create_app(
     def signin(body: SigninBody) -> dict[str, object]:
         try:
             return accounts.signin(body.email, body.password)
+        except (AccountError, AuthError) as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+
+    @api.post("/api/accounts/signin/request-code")
+    def request_signin_code(body: SigninBody) -> dict[str, object]:
+        try:
+            return accounts.request_signin_code(body.email, body.password)
+        except (AccountError, AuthError) as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+
+    @api.post("/api/accounts/signin/verify-code")
+    def verify_signin_code(body: VerifySigninCodeBody) -> dict[str, object]:
+        try:
+            return accounts.verify_signin_code(body.login_challenge_id, body.code)
         except (AccountError, AuthError) as error:
             raise HTTPException(status_code=401, detail=str(error)) from error
 

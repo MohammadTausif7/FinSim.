@@ -175,12 +175,25 @@ def _forecast_next_month(monthly: list[MonthlySummary]) -> ForecastRange:
     average = sum(spending_values, Decimal("0.00")) / Decimal(len(spending_values))
 
     if len(spending_values) >= 3:
-        recent_trend = (spending_values[-1] - spending_values[0]) / Decimal(len(spending_values) - 1)
-        expected = average + recent_trend
-        spread = max(spending_values) - min(spending_values)
-        buffer = max(spread / Decimal("2"), expected * Decimal("0.10"), Decimal("75.00"))
-        confidence = "medium"
-        method = "three-month average with recent trend"
+        alpha = Decimal("0.55")
+        beta = Decimal("0.25")
+        dampening = Decimal("0.70")
+        level = spending_values[0]
+        trend = spending_values[1] - spending_values[0]
+        errors: list[Decimal] = []
+
+        for value in spending_values[1:]:
+            one_step_forecast = max(Decimal("0.00"), level + dampening * trend)
+            errors.append(abs(value - one_step_forecast))
+            previous_level = level
+            level = alpha * value + (Decimal("1.00") - alpha) * (level + trend)
+            trend = beta * (level - previous_level) + (Decimal("1.00") - beta) * trend
+
+        expected = max(Decimal("0.00"), level + dampening * trend)
+        average_error = sum(errors, Decimal("0.00")) / Decimal(len(errors))
+        buffer = max(average_error * Decimal("1.15"), expected * Decimal("0.08"), Decimal("75.00"))
+        confidence = "high" if len(spending_values) >= 6 else "medium"
+        method = "exponential smoothing with damped trend"
     else:
         expected = average
         buffer = max(expected * Decimal("0.15"), Decimal("75.00"))

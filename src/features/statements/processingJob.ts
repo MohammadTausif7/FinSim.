@@ -28,11 +28,11 @@ export const maximumStatementBytes = 25 * 1024 * 1024
 // The interface listens to named job stages rather than inventing progress from
 // elapsed time. A backend can publish these same values without changing the UI.
 export const processingStages = [
-  { id: 'validate', label: 'Validating statements', detail: 'Checking file type, count and duplicates', progress: 14 },
-  { id: 'extract', label: 'Reading transactions', detail: 'Statement parser and reconciliation checks', progress: 42 },
-  { id: 'periods', label: 'Checking monthly coverage', detail: 'Confirming distinct statement periods', progress: 58 },
-  { id: 'clean', label: 'Cleaning descriptions', detail: 'Normalizing merchants and removing duplicates', progress: 74 },
-  { id: 'categorize', label: 'Categorizing spending', detail: 'Applying category rules and confidence scores', progress: 90 },
+  { id: 'validate', label: 'Checking your files', detail: 'Making sure the selected statements are usable', progress: 14 },
+  { id: 'extract', label: 'Finding transactions', detail: 'Reading the purchases, deposits and transfers in each statement', progress: 42 },
+  { id: 'periods', label: 'Confirming the months', detail: 'Making sure the statements cover separate monthly periods', progress: 58 },
+  { id: 'clean', label: 'Cleaning merchant names', detail: 'Combining duplicate rows and making descriptions easier to read', progress: 74 },
+  { id: 'categorizing', label: 'Grouping spending', detail: 'Placing transactions into clear financial categories', progress: 90 },
 ] as const
 
 export const sampleStatements: StatementFile[] = [

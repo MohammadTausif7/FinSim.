@@ -7,7 +7,6 @@ import {
   FileCheck2,
   FileText,
   LoaderCircle,
-  LockKeyhole,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -354,7 +353,7 @@ export default function StatementProcessingWorkspace() {
         <div className="processing-copy">
           <span className="overline">PROCESSING JOB</span>
           <h2>{jobState === 'idle' && 'Waiting for statements'}{jobState === 'processing' && processingStages[stageIndex].label}{jobState === 'review' && `${unresolved.length} ${unresolved.length === 1 ? 'transaction needs' : 'transactions need'} your help`}{jobState === 'finalizing' && 'Applying your choices'}{jobState === 'complete' && 'Your categorized data is ready'}</h2>
-          <p>{jobState === 'idle' && 'Choose files to start the parsing and categorization flow.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim paused before using uncertain categories in your analytics.'}{jobState === 'finalizing' && 'Category totals and quality checks are being refreshed.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'Analytics are ready on the dashboard, analysis and forecast pages.')}</p>
+          <p>{jobState === 'idle' && 'Choose files to start building your spending picture.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim found a few transactions where your input will improve the report.'}{jobState === 'finalizing' && 'Your report is being refreshed with the confirmed categories.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'Insights and forecast are ready to review.')}</p>
           {jobState === 'review' && <button className="button button-primary button-compact" onClick={() => setReviewOpen(true)}>Review merchants <ArrowRight /></button>}
           {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
           {jobState === 'complete' && !sampleMode && <a className="button button-primary button-compact analytics-ready-link" href="/analytics">View analytics <ArrowRight /></a>}
@@ -362,19 +361,16 @@ export default function StatementProcessingWorkspace() {
       </article>
     </section>
 
-    <section className="panel job-stage-panel">
-      <div className="panel-head"><div><span className="overline">LIVE PIPELINE</span><h2>From PDFs to categorized data</h2></div><span className="integration-badge">{sampleMode ? 'Safe sample run' : jobId ? 'Local API connected' : 'Processing API ready'}</span></div>
-      <div className="job-stages">{processingStages.map((stage, index) => {
-        const done = jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' || (jobState === 'processing' && index < stageIndex)
-        const active = jobState === 'processing' && index === stageIndex
-        return <div className={active ? 'job-stage active' : done ? 'job-stage done' : 'job-stage'} key={stage.id}>
-          <span>{done ? <Check /> : active ? <LoaderCircle className="spin" /> : index + 1}</span>
-          <div><strong>{stage.label}</strong><small>{stage.detail}</small></div>
-        </div>
-      })}</div>
+    <section className="panel statement-guidance-panel">
+      <div className="panel-head"><div><span className="overline">WHAT HAPPENS NEXT</span><h2>Your report is built in four clear checks</h2></div><span className="integration-badge">{files.length >= minimumStatementCount ? 'Ready to process' : `${minimumStatementCount - files.length} more needed`}</span></div>
+      <div className="job-stages guidance-stages">
+        <div className={files.length >= minimumStatementCount ? 'job-stage done' : 'job-stage'}><span>{files.length >= minimumStatementCount ? <Check /> : '1'}</span><div><strong>Statement coverage</strong><small>Use at least three consecutive months so trends and forecasts have context.</small></div></div>
+        <div className={jobState === 'processing' || jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? 'job-stage active' : 'job-stage'}><span>{jobState === 'processing' ? <LoaderCircle className="spin" /> : '2'}</span><div><strong>Transaction reading</strong><small>FinSim extracts dates, descriptions, amounts and balances from each PDF.</small></div></div>
+        <div className={jobState === 'review' ? 'job-stage active' : jobState === 'finalizing' || jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'review' ? <RefreshCw /> : jobState === 'finalizing' || jobState === 'complete' ? <Check /> : '3'}</span><div><strong>Merchant review</strong><small>Only unclear merchants ask for your input, and repeated merchants are grouped.</small></div></div>
+        <div className={jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'complete' ? <Check /> : '4'}</span><div><strong>Insights ready</strong><small>Spending mix, unusual charges and next month forecast update after processing.</small></div></div>
+      </div>
+      <p className="statement-privacy-copy"><ShieldCheck size={15}/> FinSim does not ask for bank credentials. Uploaded statements are used only to create your report.</p>
     </section>
-
-    <div className="privacy-note panel"><LockKeyhole/><div><strong>Private by design.</strong><p>{sampleMode || files.length === 0 ? 'Safe sample files stay in browser memory.' : 'The local processing service removes temporary PDF copies as soon as parsing finishes.'} Account data stays scoped to the signed-in user.</p></div></div>
 
     {reviewOpen && currentReview && <div className="review-backdrop" role="presentation">
       <section className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title">

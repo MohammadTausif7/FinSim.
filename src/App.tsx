@@ -49,6 +49,7 @@ import {
 
 type Theme = 'light' | 'dark'
 type ChartMetric = 'spending' | 'income' | 'net_cash_flow'
+type MonthlyChartPoint = { month: string; label: string; value: number | null }
 
 const chartMetricLabels: Record<ChartMetric, string> = {
   spending: 'Spending',
@@ -113,15 +114,36 @@ function hasFinancialData(snapshot: AnalyticsSnapshot) {
   return snapshot.transactionCount > 0 && snapshot.analytics.monthly_summaries.length > 0
 }
 
-function monthlySeries(snapshot: AnalyticsSnapshot, metric: ChartMetric, limit: number) {
+function addMonths(month: string, offset: number) {
+  const [year, monthNumber] = month.split('-').map(Number)
+  const date = new Date(year, monthNumber - 1 + offset, 1)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthlySeries(snapshot: AnalyticsSnapshot, metric: ChartMetric, limit: number): MonthlyChartPoint[] {
   const summaries = snapshot.analytics.monthly_summaries.length
     ? snapshot.analytics.monthly_summaries
     : sampleAnalyticsSnapshot.analytics.monthly_summaries
-  return summaries.slice(-limit).map((row) => ({
-    month: row.month,
-    label: formatMonthLabel(row.month).slice(0, 3).toUpperCase(),
-    value: Number(row[metric] || 0),
-  }))
+  const byMonth = new Map(summaries.map((row) => [row.month, Number(row[metric] || 0)]))
+  const latest = summaries.at(-1)?.month || sampleAnalyticsSnapshot.analytics.monthly_summaries.at(-1)!.month
+  return Array.from({ length: limit }, (_, index) => {
+    const month = addMonths(latest, index - limit + 1)
+    return {
+      month,
+      label: formatMonthLabel(month).slice(0, 3).toUpperCase(),
+      value: byMonth.get(month) ?? null,
+    }
+  })
+}
+
+function nextMonth(month: string) {
+  return addMonths(month, 1)
+}
+
+function compactMoney(value: number) {
+  const abs = Math.abs(value)
+  if (abs >= 1000) return `${value < 0 ? '-' : ''}$${(abs / 1000).toFixed(abs >= 10000 ? 0 : 1)}k`
+  return formatMoney(value)
 }
 
 function smoothPath(points: Array<{ x: number; y: number }>) {
@@ -133,6 +155,43 @@ function smoothPath(points: Array<{ x: number; y: number }>) {
     const midX = (previous.x + point.x) / 2
     return `${path} Q${previous.x} ${previous.y} ${midX} ${(previous.y + point.y) / 2} T${point.x} ${point.y}`
   }, '')
+}
+
+function estimateNextMonth(snapshot: AnalyticsSnapshot) {
+  const summaries = snapshot.analytics.monthly_summaries.length
+    ? snapshot.analytics.monthly_summaries
+    : sampleAnalyticsSnapshot.analytics.monthly_summaries
+  const spending = summaries.map((row) => Number(row.spending || 0))
+  const targetMonth = nextMonth(summaries.at(-1)?.month || latestMonth(snapshot).month)
+  if (spending.length < 3) {
+    const expected = spending.reduce((sum, value) => sum + value, 0) / Math.max(1, spending.length)
+    const buffer = Math.max(expected * 0.15, 75)
+    return { targetMonth, expected, low: Math.max(0, expected - buffer), high: expected + buffer, method: 'short history average', confidence: 'low' }
+  }
+  const alpha = 0.55
+  const beta = 0.25
+  const dampening = 0.7
+  let level = spending[0]
+  let trend = spending[1] - spending[0]
+  const errors: number[] = []
+  for (let index = 1; index < spending.length; index += 1) {
+    const forecast = Math.max(0, level + dampening * trend)
+    errors.push(Math.abs(spending[index] - forecast))
+    const previousLevel = level
+    level = alpha * spending[index] + (1 - alpha) * (level + trend)
+    trend = beta * (level - previousLevel) + (1 - beta) * trend
+  }
+  const expected = Math.max(0, level + dampening * trend)
+  const averageError = errors.reduce((sum, value) => sum + value, 0) / Math.max(1, errors.length)
+  const buffer = Math.max(averageError * 1.15, expected * 0.08, 75)
+  return {
+    targetMonth,
+    expected,
+    low: Math.max(0, expected - buffer),
+    high: expected + buffer,
+    method: 'exponential smoothing with damped trend',
+    confidence: spending.length >= 6 ? 'high' : 'medium',
+  }
 }
 
 function insightPatterns(snapshot: AnalyticsSnapshot, rows: ReturnType<typeof monthCategoryRows>, trend: ReturnType<typeof topTrend>) {
@@ -412,7 +471,6 @@ function AppShell({ children, theme, setTheme }: { children: ReactNode; theme: T
           <span className="nav-label second">ACCOUNT</span>
           <NavLink to="/settings" onClick={() => setMobileOpen(false)}><Settings size={18} />Settings</NavLink>
         </nav>
-        <div className="side-card"><span><Sparkles size={14} /></span><strong>FinSim insight</strong><p>{user ? 'Your saved account analytics refresh after each completed upload.' : 'Sign in to save processing results to your workspace.'}</p><Link to="/forecast">See forecast <ArrowRight size={13}/></Link></div>
         <div className="side-profile"><span>{initials}</span><div><strong>{user?.full_name || 'Guest'}</strong><small>{user ? 'Personal workspace' : 'Sample workspace'}</small></div>{user ? <button className="profile-action" onClick={handleSignout} type="button">Sign out</button> : <MoreHorizontal />}</div>
       </aside>
       <div className="app-main">
@@ -437,30 +495,36 @@ function MetricCard({ label, value, detail, trend, down, icon: Icon, to, onClick
   return to ? <Link className="metric-card metric-card-link" to={to}>{content}</Link> : <article className="metric-card">{content}</article>
 }
 
-function SpendingChart({ forecast = false, series, metric = 'spending' }: { forecast?: boolean; series?: ReturnType<typeof monthlySeries>; metric?: ChartMetric }) {
+function SpendingChart({ forecast = false, series, metric = 'spending' }: { forecast?: boolean; series?: MonthlyChartPoint[]; metric?: ChartMetric }) {
   const data = series?.length ? series : monthlySeries(sampleAnalyticsSnapshot, metric, 6)
-  const [activeIndex, setActiveIndex] = useState(Math.max(0, data.length - 1))
+  const lastDataIndex = Math.max(0, data.reduce((last, point, index) => (point.value === null ? last : index), -1))
+  const [activeIndex, setActiveIndex] = useState(lastDataIndex)
   const width = 780
   const height = 260
-  const left = 22
+  const left = 70
   const right = 24
   const top = 30
   const bottom = 214
-  const values = data.map((point) => point.value)
-  const min = metric === 'net_cash_flow' ? Math.min(0, ...values) : Math.min(...values)
-  const max = Math.max(...values, metric === 'net_cash_flow' ? 0 : 1)
+  const values = data.map((point) => point.value).filter((value): value is number => value !== null)
+  const domainValues = values.length ? values : [0]
+  const min = metric === 'net_cash_flow' ? Math.min(0, ...domainValues) : Math.min(...domainValues)
+  const max = Math.max(...domainValues, metric === 'net_cash_flow' ? 0 : 1)
   const range = max - min || 1
   const points = data.map((point, index) => ({
     ...point,
     x: data.length === 1 ? width / 2 : left + (index * (width - left - right)) / (data.length - 1),
-    y: top + ((max - point.value) / range) * (bottom - top),
+    y: point.value === null ? null : top + ((max - point.value) / range) * (bottom - top),
   }))
-  const linePath = smoothPath(points)
-  const areaPath = `${linePath} L${points.at(-1)?.x || width} ${bottom} L${points[0]?.x || left} ${bottom} Z`
+  const actualPoints = points.filter((point) => point.y !== null && point.value !== null) as Array<typeof points[number] & { y: number; value: number }>
+  const linePath = smoothPath(actualPoints)
+  const areaPath = actualPoints.length ? `${linePath} L${actualPoints.at(-1)?.x || width} ${bottom} L${actualPoints[0]?.x || left} ${bottom} Z` : ''
   const active = points[Math.min(activeIndex, points.length - 1)]
-  const previous = points[Math.max(0, activeIndex - 1)]
-  const delta = active && previous ? active.value - previous.value : 0
-  return <div className="spending-chart interactive-chart"><div className="chart-readout"><span>{active?.label || 'NOW'}</span><strong>{formatMoney(active?.value || 0)}</strong><small className={delta >= 0 ? 'up' : 'down'}>{activeIndex > 0 ? `${delta >= 0 ? '+' : ''}${formatMoney(delta)} from previous point` : chartMetricLabels[metric]}</small></div><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${chartMetricLabels[metric]} trend chart`}><defs><linearGradient id={`chartFill-${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".25"/><stop offset="1" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs><path className="chart-grid" d="M22 38H756M22 92H756M22 146H756M22 200H756"/><path className="chart-area" d={areaPath} fill={`url(#chartFill-${metric})`}/><path className="chart-line" d={linePath}/>{forecast && points.at(-1) && <path className="forecast-line" d={`M${points.at(-1)!.x} ${points.at(-1)!.y} C700 75 740 96 780 62`}/>} {points.map((point, index) => <circle key={point.month} cx={point.x} cy={point.y} r={index === activeIndex ? 7 : 4} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex={0} aria-label={`${point.label}: ${formatMoney(point.value)}`}/>)}</svg><div className="chart-labels">{data.map((point)=><span key={point.month}>{point.label}</span>)}</div></div>
+  const previous = points.slice(0, activeIndex).reverse().find((point) => point.value !== null)
+  const activeValue = active?.value
+  const previousValue = previous?.value
+  const delta = activeValue !== null && activeValue !== undefined && previousValue !== null && previousValue !== undefined ? activeValue - previousValue : 0
+  const yTicks = [max, min + range / 2, min]
+  return <div className="spending-chart interactive-chart"><div className="chart-readout"><span>{active?.label || 'NOW'}</span><strong>{active?.value === null ? 'No data' : formatMoney(active?.value || 0)}</strong><small className={delta >= 0 ? 'up' : 'down'}>{active?.value === null ? 'No statement for this month' : activeIndex > 0 && previous ? `${delta >= 0 ? '+' : ''}${formatMoney(delta)} from previous point` : chartMetricLabels[metric]}</small></div><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${chartMetricLabels[metric]} trend chart`}><defs><linearGradient id={`chartFill-${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".25"/><stop offset="1" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs>{yTicks.map((tick, index) => <g key={index}><text className="chart-y-label" x="0" y={top + index * ((bottom - top) / 2) + 4}>{compactMoney(tick)}</text><path className="chart-grid" d={`M${left} ${top + index * ((bottom - top) / 2)}H756`}/></g>)}{areaPath && <path className="chart-area" d={areaPath} fill={`url(#chartFill-${metric})`}/>}<path className="chart-line" d={linePath}/>{forecast && actualPoints.at(-1) && <path className="forecast-line" d={`M${actualPoints.at(-1)!.x} ${actualPoints.at(-1)!.y} C700 75 740 96 780 62`}/>} {points.map((point, index) => point.value === null || point.y === null ? <circle key={point.month} className="chart-empty-point" cx={point.x} cy={bottom} r="3" /> : <circle key={point.month} cx={point.x} cy={point.y} r={index === activeIndex ? 7 : 4} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex={0} aria-label={`${point.label}: ${formatMoney(point.value)}`}/>)}</svg><div className="chart-labels">{data.map((point)=><span className={point.value === null ? 'empty' : ''} key={point.month}>{point.label}</span>)}</div></div>
 }
 
 function Dashboard() {
@@ -491,7 +555,7 @@ function Analytics() {
   return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact">{formatMonthLabel(current.month)} <ChevronRight size={15}/></button></PageHeader>
     <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
     <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALY CANDIDATES" value={String(anomalyCount)} detail="open transaction review" icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
-    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>setChartWindow(Number(event.target.value))} aria-label="Chart period"><option value={3}>Last 3 months</option><option value={6}>Last 6 months</option><option value={12}>Last 12 months</option></select></div></div><SpendingChart series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</article></div>
+    <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>setChartWindow(Number(event.target.value))} aria-label="Chart period"><option value={3}>Last 3 months</option><option value={6}>Last 6 months</option><option value={12}>Last 12 months</option></select></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</article></div>
     <article className="panel insight-patterns" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Financial signals, not just alerts</h2></div><span className="confidence"><Sparkles size={14}/> {sourceLabel(snapshot)}</span></div><div className="pattern-grid">{patterns.map(({ title, body, signal, icon: Icon, tone })=><div className="pattern-card" key={title}><span className={`pattern-icon ${tone}`}><Icon/></span><strong>{title}</strong><p>{body}</p><small>{signal}</small></div>)}</div></article>
     <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions behind the insights</h2></div><Link to="/statements">Upload more <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
     {insightDialogOpen && <InsightDialog snapshot={snapshot} trend={trend} onClose={() => setInsightDialogOpen(false)} />}
@@ -501,10 +565,13 @@ function Analytics() {
 
 function Forecast() {
   const snapshot = useAnalyticsSnapshot()
-  const forecast = snapshot.analytics.forecast
+  const forecast = estimateNextMonth(snapshot)
   const current = latestMonth(snapshot)
-  const [dining, setDining] = useState(340)
-  const [shopping, setShopping] = useState(390)
+  const forecastRows = monthCategoryRows(snapshot)
+  const baselineDining = Number(forecastRows.find((row) => row.name.toLowerCase().includes('dining'))?.amount.replace(/[$,]/g, '') || 340)
+  const baselineShopping = Number(forecastRows.find((row) => row.name.toLowerCase().includes('shopping'))?.amount.replace(/[$,]/g, '') || 390)
+  const [dining, setDining] = useState(Math.round(baselineDining || 340))
+  const [shopping, setShopping] = useState(Math.round(baselineShopping || 390))
   const [income, setIncome] = useState(Math.max(3000, Math.round(Number(current.income) || 4200)))
   if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
     return <>
@@ -512,14 +579,16 @@ function Forecast() {
       <EmptyWorkspace title="Upload statements to unlock next month ranges." message="FinSim needs at least three consecutive months before it can build a useful forecast and scenario simulator." />
     </>
   }
-  const forecastExpected = Number(forecast?.expected_spending || current.spending || 2260)
-  const forecastLow = Number(forecast?.low || forecastExpected - 180)
-  const forecastHigh = Number(forecast?.high || forecastExpected + 220)
-  const predicted = Math.round(forecastExpected + dining * .12 + shopping * .1 - 90)
+  const forecastExpected = forecast.expected
+  const forecastLow = forecast.low
+  const forecastHigh = forecast.high
+  const predicted = Math.max(0, Math.round(forecastExpected - baselineDining - baselineShopping + dining + shopping))
+  const adjustedLow = Math.max(0, forecastLow + predicted - forecastExpected)
+  const adjustedHigh = forecastHigh + predicted - forecastExpected
   const savings = income - predicted
-  return <><PageHeader eyebrow={`${formatMonthLabel(forecast?.target_month || '2026-07').toUpperCase()} OUTLOOK`} title="Shape your next month."><span className="confidence"><Sparkles size={14}/> {forecast?.confidence || 'medium'} confidence</span></PageHeader>
-    <div className="forecast-hero panel"><div><span className="overline">PREDICTED SPENDING</span><strong>{formatMoney(forecastLow)} to {formatMoney(forecastHigh)}</strong><p>Most likely: <b>{formatMoney(forecastExpected)}</b></p></div><div className="forecast-health"><span>{Math.round(Math.max(20,Math.min(95,savings/income*200)))}%</span><div><strong>Projected savings rate</strong><small>{formatMoney(savings)} left after spending</small></div></div></div>
-    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust your assumptions</h2></div><button onClick={()=>{setDining(340);setShopping(390);setIncome(Math.max(3000, Math.round(Number(current.income) || 4200)))}}>Reset</button></div><p>Move the sliders to see how everyday choices change your forecast.</p><ForecastSlider label="Expected income" value={income} min={3000} max={7000} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={100} max={800} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={100} max={1000} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : 'A small trim keeps your plan on track.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Where it may go</h2></div></div>{monthCategoryRows(snapshot).slice(0,5).map((row)=><div className="forecast-row" key={row.name}><div><span>{row.name}</span><strong>{row.amount}</strong></div><div><i style={{width:`${Math.min(100, row.value)}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>{forecast?.method || 'Baseline calculation'}</strong><p>{snapshot.source === 'sample' ? 'Upload statements to replace this example with your own forecast.' : 'This forecast is based on your processed statement history and adjustable assumptions.'}</p></div></div></article></div>
+  return <><PageHeader eyebrow={`${formatMonthLabel(forecast.targetMonth).toUpperCase()} OUTLOOK`} title="Shape your next month."><span className="confidence"><Sparkles size={14}/> {forecast.confidence} confidence</span></PageHeader>
+    <div className="forecast-hero panel"><div><span className="overline">NEXT MONTH SPENDING RANGE</span><strong>{formatMoney(adjustedLow)} to {formatMoney(adjustedHigh)}</strong><p>Most likely after your assumptions: <b>{formatMoney(predicted)}</b></p></div><div className="forecast-health"><span>{Math.round(Math.max(0,Math.min(80,savings/income*100)))}%</span><div><strong>Projected savings rate</strong><small>{savings >= 0 ? `${formatMoney(savings)} left after spending` : `${formatMoney(Math.abs(savings))} above expected income`}</small></div></div></div>
+    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust next month</h2></div><button onClick={()=>{setDining(Math.round(baselineDining || 340));setShopping(Math.round(baselineShopping || 390));setIncome(Math.max(3000, Math.round(Number(current.income) || 4200)))}}>Reset</button></div><p>Move the sliders to see how changes in income or flexible spending affect only the next month estimate.</p><ForecastSlider label="Expected income" value={income} min={3000} max={7000} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={100} max={800} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={100} max={1000} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : savings >= 0 ? 'This plan stays above water.' : 'This plan would run above income.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Likely drivers</h2></div></div>{forecastRows.slice(0,5).map((row)=><div className="forecast-row" key={row.name}><div><span>{row.name}</span><strong>{row.amount}</strong></div><div><i style={{width:`${Math.min(100, row.value)}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>{forecast.method}</strong><p>{snapshot.source === 'sample' ? 'Upload statements to replace this example with your own next month estimate.' : 'This next month forecast uses your monthly spending history, recent trend and recent volatility.'}</p></div></div></article></div>
   </>
 }
 

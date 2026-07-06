@@ -50,12 +50,16 @@ import {
 type Theme = 'light' | 'dark'
 type ChartMetric = 'spending' | 'income' | 'net_cash_flow'
 type MonthlyChartPoint = { month: string; label: string; value: number | null }
+type ForecastEstimate = { expected: number; low: number; high: number; method: string; confidence: string }
 
 const chartMetricLabels: Record<ChartMetric, string> = {
   spending: 'Spending',
   income: 'Income',
   net_cash_flow: 'Net cash flow',
 }
+
+const anomalyReviewPrefix = 'finsim-reviewed-anomalies'
+const budgetTargetPrefix = 'finsim-budget-targets'
 
 // These records are intentionally fictional. They let us build and review the
 // interface without putting anyone's real financial history in the repository.
@@ -146,6 +150,10 @@ function compactMoney(value: number) {
   return formatMoney(value)
 }
 
+function snapshotStorageId(snapshot: AnalyticsSnapshot) {
+  return `${snapshot.source}-${snapshot.updatedAt}-${snapshot.transactionCount}`
+}
+
 function smoothPath(points: Array<{ x: number; y: number }>) {
   if (!points.length) return ''
   if (points.length === 1) return `M${points[0].x} ${points[0].y}`
@@ -157,16 +165,11 @@ function smoothPath(points: Array<{ x: number; y: number }>) {
   }, '')
 }
 
-function estimateNextMonth(snapshot: AnalyticsSnapshot) {
-  const summaries = snapshot.analytics.monthly_summaries.length
-    ? snapshot.analytics.monthly_summaries
-    : sampleAnalyticsSnapshot.analytics.monthly_summaries
-  const spending = summaries.map((row) => Number(row.spending || 0))
-  const targetMonth = nextMonth(summaries.at(-1)?.month || latestMonth(snapshot).month)
+function estimateSpendingValues(spending: number[]): ForecastEstimate {
   if (spending.length < 3) {
     const expected = spending.reduce((sum, value) => sum + value, 0) / Math.max(1, spending.length)
     const buffer = Math.max(expected * 0.15, 75)
-    return { targetMonth, expected, low: Math.max(0, expected - buffer), high: expected + buffer, method: 'short history average', confidence: 'low' }
+    return { expected, low: Math.max(0, expected - buffer), high: expected + buffer, method: 'short history average', confidence: 'low' }
   }
   const alpha = 0.55
   const beta = 0.25
@@ -185,7 +188,6 @@ function estimateNextMonth(snapshot: AnalyticsSnapshot) {
   const averageError = errors.reduce((sum, value) => sum + value, 0) / Math.max(1, errors.length)
   const buffer = Math.max(averageError * 1.15, expected * 0.08, 75)
   return {
-    targetMonth,
     expected,
     low: Math.max(0, expected - buffer),
     high: expected + buffer,
@@ -194,13 +196,121 @@ function estimateNextMonth(snapshot: AnalyticsSnapshot) {
   }
 }
 
-function insightPatterns(snapshot: AnalyticsSnapshot, rows: ReturnType<typeof monthCategoryRows>, trend: ReturnType<typeof topTrend>) {
+function estimateNextMonth(snapshot: AnalyticsSnapshot) {
+  const summaries = snapshot.analytics.monthly_summaries.length
+    ? snapshot.analytics.monthly_summaries
+    : sampleAnalyticsSnapshot.analytics.monthly_summaries
+  const spending = summaries.map((row) => Number(row.spending || 0))
+  const targetMonth = nextMonth(summaries.at(-1)?.month || latestMonth(snapshot).month)
+  return { targetMonth, ...estimateSpendingValues(spending) }
+}
+
+function forecastAccuracyRows(snapshot: AnalyticsSnapshot) {
+  const summaries = snapshot.analytics.monthly_summaries
+  return summaries
+    .map((row, index) => {
+      if (index < 3) return null
+      const previousMonths = summaries.slice(0, index).map((item) => Number(item.spending || 0))
+      const estimate = estimateSpendingValues(previousMonths)
+      const actual = Number(row.spending || 0)
+      const error = actual - estimate.expected
+      const accuracy = actual > 0 ? Math.max(0, 100 - (Math.abs(error) / actual) * 100) : 100
+      return {
+        month: row.month,
+        expected: estimate.expected,
+        actual,
+        error,
+        accuracy,
+      }
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .slice(-4)
+}
+
+function recurringItems(snapshot: AnalyticsSnapshot) {
+  const groups = new Map<string, { merchant: string; category: string; amounts: number[]; months: Set<string> }>()
+  snapshot.transactions.forEach((row) => {
+    const merchant = String(row.merchant_clean || row.merchant || row.description_raw || '').trim()
+    if (!merchant) return
+    const category = String(row.category || 'Other')
+    const amount = Math.abs(Number(row.amount || 0))
+    const month = String(row.posted_at || '').slice(0, 7)
+    if (!month || !amount) return
+    const key = merchant.toLowerCase()
+    const existing = groups.get(key) || { merchant, category, amounts: [], months: new Set<string>() }
+    existing.amounts.push(amount)
+    existing.months.add(month)
+    groups.set(key, existing)
+  })
+
+  const recurringCategories = new Set(['Housing', 'Subscriptions', 'Utilities', 'Insurance', 'Services'])
+  return Array.from(groups.values())
+    .map((group) => {
+      const average = group.amounts.reduce((sum, value) => sum + value, 0) / group.amounts.length
+      const monthCount = group.months.size
+      const isLikelyRecurring = monthCount >= 2 || recurringCategories.has(group.category)
+      return {
+        ...group,
+        average,
+        monthCount,
+        isLikelyRecurring,
+        cadence: monthCount >= 2 ? `${monthCount} months observed` : 'Likely scheduled payment',
+      }
+    })
+    .filter((group) => group.isLikelyRecurring)
+    .sort((a, b) => b.monthCount - a.monthCount || b.average - a.average)
+    .slice(0, 5)
+}
+
+function anomalyReviewKey(snapshot: AnalyticsSnapshot) {
+  return `${anomalyReviewPrefix}:${snapshotStorageId(snapshot)}`
+}
+
+function loadReviewedAnomalies(key: string) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]')
+    return Array.isArray(parsed) ? parsed.map(String) : []
+  } catch {
+    return []
+  }
+}
+
+function saveReviewedAnomalies(key: string, ids: string[]) {
+  localStorage.setItem(key, JSON.stringify(Array.from(new Set(ids))))
+}
+
+function budgetTargetKey(snapshot: AnalyticsSnapshot) {
+  return `${budgetTargetPrefix}:${snapshot.source}`
+}
+
+function loadBudgetTargets(key: string) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '{}') as Record<string, number>
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => Number.isFinite(Number(value))))
+  } catch {
+    return {}
+  }
+}
+
+function saveBudgetTargets(key: string, targets: Record<string, number>) {
+  localStorage.setItem(key, JSON.stringify(targets))
+}
+
+function anomalyExplanation(item: AnomalyCandidate) {
+  const reason = item.reason.toLowerCase()
+  if (reason.includes('large')) return 'This transaction is much larger than normal account activity, so FinSim separates it for a quick confirmation.'
+  if (reason.includes('recurring') || reason.includes('subscription')) return 'This looks like a repeated bill or subscription. Reviewing it helps catch forgotten recurring charges.'
+  if (reason.includes('uncertain') || reason.includes('confidence')) return 'The category confidence was low, so your review can improve future categorization.'
+  return 'This charge stands out by amount, timing or category pattern compared with the processed statement history.'
+}
+
+function insightPatterns(snapshot: AnalyticsSnapshot, rows: ReturnType<typeof monthCategoryRows>, trend: ReturnType<typeof topTrend>, openAnomalyCount?: number) {
   const current = latestMonth(snapshot)
   const topCategory = rows[0]
   const netCashFlow = Number(current.net_cash_flow)
   const income = Math.max(Number(current.income), 1)
   const savingsRate = Math.round((netCashFlow / income) * 100)
-  const anomalyCount = snapshot.analytics.anomaly_candidates.length
+  const anomalyCount = openAnomalyCount ?? snapshot.analytics.anomaly_candidates.length
   const patterns = [
     {
       title: topCategory ? `${topCategory.name} drives ${topCategory.value.toFixed(0)}% of spend` : 'Spending mix needs more data',
@@ -256,23 +366,35 @@ function EmptyWorkspace({ title, message }: { title: string; message: string }) 
   )
 }
 
-function AnomalyDialog({ items, onClose }: { items: AnomalyCandidate[]; onClose: () => void }) {
+function AnomalyDialog({
+  items,
+  onClose,
+  onClear,
+  onClearAll,
+}: {
+  items: AnomalyCandidate[]
+  onClose: () => void
+  onClear: (transactionId: string) => void
+  onClearAll: () => void
+}) {
   const rows = items.length ? items : []
   return (
     <div className="review-backdrop" role="presentation">
       <section className="review-dialog insight-dialog" role="dialog" aria-modal="true" aria-labelledby="anomaly-dialog-title">
         <div className="review-dialog-head">
-          <div><span className="overline">ANOMALY CANDIDATES</span><h2 id="anomaly-dialog-title">Transactions worth checking</h2></div>
+          <div><span className="overline">ANOMALY REVIEW</span><h2 id="anomaly-dialog-title">{rows.length ? 'Transactions worth checking' : 'No anomalies, all verified'}</h2></div>
           <button autoFocus onClick={onClose} aria-label="Close anomaly details"><X /></button>
         </div>
-        <p className="dialog-intro">These are not automatically wrong. FinSim is surfacing charges that are large, unusual, recurring or category uncertain so you can review them quickly.</p>
+        <p className="dialog-intro">These are not automatically wrong. FinSim shows why each item was flagged so you can mark the charge as verified when it looks correct.</p>
         <div className="dialog-list">
-          {rows.length ? rows.map((item) => <div className="dialog-row" key={item.transaction_id}>
+          {rows.length ? rows.map((item) => <div className="dialog-row anomaly-row" key={item.transaction_id}>
             <span className={`severity-dot ${item.severity}`}/>
-            <div><strong>{item.merchant}</strong><small>{item.reason} · {item.category} · {item.posted_at ? formatMonthLabel(item.posted_at.slice(0, 7)) : 'Latest data'}</small></div>
+            <div><strong>{item.merchant}</strong><small>{item.reason} · {item.category} · {item.posted_at ? formatMonthLabel(item.posted_at.slice(0, 7)) : 'Latest data'}</small><p>{anomalyExplanation(item)}</p></div>
             <b>{formatMoney(item.amount)}</b>
-          </div>) : <div className="dialog-row"><span className="severity-dot low"/><div><strong>No unusual activity found</strong><small>FinSim did not find anomaly candidates in this data set.</small></div><b>$0</b></div>}
+            <button type="button" onClick={() => onClear(item.transaction_id)}>Mark verified</button>
+          </div>) : <div className="dialog-row verified-row"><span className="severity-dot low"/><div><strong>No anomalies, all verified</strong><small>Every surfaced item has been reviewed or this data set did not produce anomaly candidates.</small></div><b>✓</b></div>}
         </div>
+        {rows.length > 0 && <div className="review-dialog-foot"><button type="button" onClick={onClearAll}><Check /> Mark all verified</button><span>Verified items disappear from the open anomaly count for this statement run.</span></div>}
       </section>
     </div>
   )
@@ -527,6 +649,35 @@ function SpendingChart({ forecast = false, series, metric = 'spending' }: { fore
   return <div className="spending-chart interactive-chart"><div className="chart-readout"><span>{active?.label || 'NOW'}</span><strong>{active?.value === null ? 'No data' : formatMoney(active?.value || 0)}</strong><small className={delta >= 0 ? 'up' : 'down'}>{active?.value === null ? 'No statement for this month' : activeIndex > 0 && previous ? `${delta >= 0 ? '+' : ''}${formatMoney(delta)} from previous point` : chartMetricLabels[metric]}</small></div><svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={`${chartMetricLabels[metric]} trend chart`}><defs><linearGradient id={`chartFill-${metric}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".25"/><stop offset="1" stopColor="var(--accent)" stopOpacity="0"/></linearGradient></defs>{yTicks.map((tick, index) => <g key={index}><text className="chart-y-label" x="0" y={top + index * ((bottom - top) / 2) + 4}>{compactMoney(tick)}</text><path className="chart-grid" d={`M${left} ${top + index * ((bottom - top) / 2)}H756`}/></g>)}{areaPath && <path className="chart-area" d={areaPath} fill={`url(#chartFill-${metric})`}/>}<path className="chart-line" d={linePath}/>{forecast && actualPoints.at(-1) && <path className="forecast-line" d={`M${actualPoints.at(-1)!.x} ${actualPoints.at(-1)!.y} C700 75 740 96 780 62`}/>} {points.map((point, index) => point.value === null || point.y === null ? <circle key={point.month} className="chart-empty-point" cx={point.x} cy={bottom} r="3" /> : <circle key={point.month} cx={point.x} cy={point.y} r={index === activeIndex ? 7 : 4} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)} tabIndex={0} aria-label={`${point.label}: ${formatMoney(point.value)}`}/>)}</svg><div className="chart-labels">{data.map((point)=><span className={point.value === null ? 'empty' : ''} key={point.month}>{point.label}</span>)}</div></div>
 }
 
+function ForecastAccuracyPanel({ snapshot }: { snapshot: AnalyticsSnapshot }) {
+  const rows = forecastAccuracyRows(snapshot)
+  const latest = rows.at(-1)
+  return <article className="panel insight-mini-panel accuracy-panel"><div className="panel-head"><div><span className="overline">FORECAST ACCURACY</span><h2>{latest ? `${Math.round(latest.accuracy)}% accurate for ${formatMonthLabel(latest.month)}` : 'Learning from each month'}</h2></div><span className="confidence"><Gauge size={14}/> actuals</span></div>{latest ? <><div className="accuracy-main"><div><span>Predicted</span><strong>{formatMoney(latest.expected)}</strong></div><div><span>Actual</span><strong>{formatMoney(latest.actual)}</strong></div><div><span>Difference</span><strong className={latest.error > 0 ? 'over' : 'under'}>{latest.error >= 0 ? '+' : ''}{formatMoney(latest.error)}</strong></div></div><div className="accuracy-history">{rows.map((row)=><span key={row.month} title={`${formatMonthLabel(row.month)} forecast accuracy`}><i style={{ height: `${Math.max(10, Math.min(100, row.accuracy))}%` }}/><b>{formatMonthLabel(row.month).slice(0,3)}</b></span>)}</div></> : <p className="panel-empty-copy">Once the next real month is uploaded, FinSim compares the prior forecast with actual spending and shows the error here.</p>}</article>
+}
+
+function RecurringPanel({ snapshot }: { snapshot: AnalyticsSnapshot }) {
+  const items = recurringItems(snapshot)
+  return <article className="panel insight-mini-panel recurring-panel"><div className="panel-head"><div><span className="overline">RECURRING MONEY</span><h2>Bills and subscriptions</h2></div><span className="confidence"><ReceiptText size={14}/> {items.length} found</span></div><div className="recurring-list">{items.length ? items.map((item)=><div key={`${item.merchant}-${item.category}`}><span><strong>{item.merchant}</strong><small>{item.category} · {item.cadence}</small></span><b>{formatMoney(item.average)}</b></div>) : <p className="panel-empty-copy">No repeating merchants are visible yet. More months will improve subscription and bill detection.</p>}</div></article>
+}
+
+function BudgetTargetsPanel({ snapshot, rows }: { snapshot: AnalyticsSnapshot; rows: ReturnType<typeof monthCategoryRows> }) {
+  const key = budgetTargetKey(snapshot)
+  const [version, setVersion] = useState(0)
+  const targets = useMemo(() => {
+    void version
+    return loadBudgetTargets(key)
+  }, [key, version])
+  function targetFor(row: ReturnType<typeof monthCategoryRows>[number]) {
+    return Math.round(targets[row.name] ?? Math.max(Number(row.amount.replace(/[$,]/g, '')) * 1.1, 100))
+  }
+  function updateTarget(category: string, value: number) {
+    const next = { ...targets, [category]: Math.max(0, Math.round(value || 0)) }
+    saveBudgetTargets(key, next)
+    setVersion((current) => current + 1)
+  }
+  return <article className="panel budget-panel"><div className="panel-head"><div><span className="overline">BUDGET TARGETS</span><h2>Set category limits</h2></div><span className="confidence"><Target size={14}/> editable</span></div><div className="budget-list">{rows.slice(0,5).map((row)=>{const spent=Number(row.amount.replace(/[$,]/g,''));const target=targetFor(row);const percent=target ? Math.min(140,(spent/target)*100) : 0;return <div className="budget-row" key={row.name}><div><span><i style={{background:row.color}}/>{row.name}</span><label><b>$</b><input type="number" min={0} value={target} onChange={(event)=>updateTarget(row.name, Number(event.target.value))} aria-label={`${row.name} monthly budget target`}/></label></div><div className="progress"><i style={{width:`${Math.min(100,percent)}%`,background:percent>100?'#e11d48':row.color}}/></div><small>{formatMoney(spent)} spent of {formatMoney(target)} {percent>100?'· over target':'· on watch'}</small></div>})}</div></article>
+}
+
 function Dashboard() {
   return <Navigate to="/statements" replace />
 }
@@ -537,6 +688,21 @@ function Analytics() {
   const [insightDialogOpen, setInsightDialogOpen] = useState(false)
   const [chartMetric, setChartMetric] = useState<ChartMetric>('spending')
   const [chartWindow, setChartWindow] = useState(6)
+  const [anomalyReviewVersion, setAnomalyReviewVersion] = useState(0)
+  const anomalyKey = anomalyReviewKey(snapshot)
+  const reviewedAnomalies = useMemo(() => {
+    void anomalyReviewVersion
+    return loadReviewedAnomalies(anomalyKey)
+  }, [anomalyKey, anomalyReviewVersion])
+  const openAnomalies = snapshot.analytics.anomaly_candidates.filter((item) => !reviewedAnomalies.includes(item.transaction_id))
+  function clearAnomaly(transactionId: string) {
+    saveReviewedAnomalies(anomalyKey, [...reviewedAnomalies, transactionId])
+    setAnomalyReviewVersion((current) => current + 1)
+  }
+  function clearAllAnomalies() {
+    saveReviewedAnomalies(anomalyKey, snapshot.analytics.anomaly_candidates.map((item) => item.transaction_id))
+    setAnomalyReviewVersion((current) => current + 1)
+  }
   if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
     return <>
       <PageHeader eyebrow="DETAILED ANALYSIS" title="No analysis yet."/>
@@ -548,18 +714,19 @@ function Analytics() {
   const trend = topTrend(snapshot)
   const largest = rows[0] || categories[0]
   const dailySpend = Number(current.spending) / Math.max(1, current.transaction_count)
-  const anomalyCount = snapshot.analytics.anomaly_candidates.length
+  const anomalyCount = openAnomalies.length
   const recent = transactionPreview(snapshot)
-  const patterns = insightPatterns(snapshot, rows, trend)
+  const patterns = insightPatterns(snapshot, rows, trend, anomalyCount)
   const chartData = monthlySeries(snapshot, chartMetric, chartWindow)
   return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact">{formatMonthLabel(current.month)} <ChevronRight size={15}/></button></PageHeader>
     <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
-    <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALY CANDIDATES" value={String(anomalyCount)} detail="open transaction review" icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
+    <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALIES" value={anomalyCount ? String(anomalyCount) : '0'} detail={anomalyCount ? 'open transaction review' : 'No anomalies, all verified'} icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
     <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>setChartWindow(Number(event.target.value))} aria-label="Chart period"><option value={3}>Last 3 months</option><option value={6}>Last 6 months</option><option value={12}>Last 12 months</option></select></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</article></div>
+    <div className="insight-ops-grid"><ForecastAccuracyPanel snapshot={snapshot}/><RecurringPanel snapshot={snapshot}/><BudgetTargetsPanel snapshot={snapshot} rows={rows}/></div>
     <article className="panel insight-patterns" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Financial signals, not just alerts</h2></div><span className="confidence"><Sparkles size={14}/> {sourceLabel(snapshot)}</span></div><div className="pattern-grid">{patterns.map(({ title, body, signal, icon: Icon, tone })=><div className="pattern-card" key={title}><span className={`pattern-icon ${tone}`}><Icon/></span><strong>{title}</strong><p>{body}</p><small>{signal}</small></div>)}</div></article>
     <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions behind the insights</h2></div><Link to="/statements">Upload more <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
     {insightDialogOpen && <InsightDialog snapshot={snapshot} trend={trend} onClose={() => setInsightDialogOpen(false)} />}
-    {anomalyDialogOpen && <AnomalyDialog items={snapshot.analytics.anomaly_candidates} onClose={() => setAnomalyDialogOpen(false)} />}
+    {anomalyDialogOpen && <AnomalyDialog items={openAnomalies} onClose={() => setAnomalyDialogOpen(false)} onClear={clearAnomaly} onClearAll={clearAllAnomalies} />}
   </>
 }
 
@@ -586,13 +753,23 @@ function Forecast() {
   const adjustedLow = Math.max(0, forecastLow + predicted - forecastExpected)
   const adjustedHigh = forecastHigh + predicted - forecastExpected
   const savings = income - predicted
+  const savingsRateDenominator = Math.max(1, income)
+  const projectedSavingsRate = Math.round(Math.max(0, Math.min(80, (savings / savingsRateDenominator) * 100)))
+  const incomeMax = Math.max(7000, income, Math.ceil(Number(current.income || 0) * 1.5))
+  const diningMax = Math.max(1000, dining, Math.ceil(baselineDining * 2))
+  const shoppingMax = Math.max(1200, shopping, Math.ceil(baselineShopping * 2))
   return <><PageHeader eyebrow={`${formatMonthLabel(forecast.targetMonth).toUpperCase()} OUTLOOK`} title="Shape your next month."><span className="confidence"><Sparkles size={14}/> {forecast.confidence} confidence</span></PageHeader>
-    <div className="forecast-hero panel"><div><span className="overline">NEXT MONTH SPENDING RANGE</span><strong>{formatMoney(adjustedLow)} to {formatMoney(adjustedHigh)}</strong><p>Most likely after your assumptions: <b>{formatMoney(predicted)}</b></p></div><div className="forecast-health"><span>{Math.round(Math.max(0,Math.min(80,savings/income*100)))}%</span><div><strong>Projected savings rate</strong><small>{savings >= 0 ? `${formatMoney(savings)} left after spending` : `${formatMoney(Math.abs(savings))} above expected income`}</small></div></div></div>
-    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust next month</h2></div><button onClick={()=>{setDining(Math.round(baselineDining || 340));setShopping(Math.round(baselineShopping || 390));setIncome(Math.max(3000, Math.round(Number(current.income) || 4200)))}}>Reset</button></div><p>Move the sliders to see how changes in income or flexible spending affect only the next month estimate.</p><ForecastSlider label="Expected income" value={income} min={3000} max={7000} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={100} max={800} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={100} max={1000} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : savings >= 0 ? 'This plan stays above water.' : 'This plan would run above income.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Likely drivers</h2></div></div>{forecastRows.slice(0,5).map((row)=><div className="forecast-row" key={row.name}><div><span>{row.name}</span><strong>{row.amount}</strong></div><div><i style={{width:`${Math.min(100, row.value)}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>{forecast.method}</strong><p>{snapshot.source === 'sample' ? 'Upload statements to replace this example with your own next month estimate.' : 'This next month forecast uses your monthly spending history, recent trend and recent volatility.'}</p></div></div></article></div>
+    <div className="forecast-hero panel"><div><span className="overline">NEXT MONTH SPENDING RANGE</span><strong>{formatMoney(adjustedLow)} to {formatMoney(adjustedHigh)}</strong><p>Most likely after your assumptions: <b>{formatMoney(predicted)}</b></p></div><div className="forecast-health"><span>{projectedSavingsRate}%</span><div><strong>Projected savings rate</strong><small>{savings >= 0 ? `${formatMoney(savings)} left after spending` : `${formatMoney(Math.abs(savings))} above expected income`}</small></div></div></div>
+    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust next month</h2></div><button onClick={()=>{setDining(Math.round(baselineDining || 340));setShopping(Math.round(baselineShopping || 390));setIncome(Math.max(3000, Math.round(Number(current.income) || 4200)))}}>Reset</button></div><p>Use the sliders or type exact dollar values to see how income and flexible spending affect only the next month estimate.</p><ForecastSlider label="Expected income" value={income} min={0} max={incomeMax} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={0} max={diningMax} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={0} max={shoppingMax} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : savings >= 0 ? 'This plan stays above water.' : 'This plan would run above income.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Likely drivers</h2></div></div>{forecastRows.slice(0,5).map((row)=><div className="forecast-row" key={row.name}><div><span>{row.name}</span><strong>{row.amount}</strong></div><div><i style={{width:`${Math.min(100, row.value)}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>{forecast.method}</strong><p>{snapshot.source === 'sample' ? 'Upload statements to replace this example with your own next month estimate.' : 'This next month forecast uses your monthly spending history, recent trend and recent volatility.'}</p></div></div></article></div>
   </>
 }
 
-function ForecastSlider({label,value,min,max,setValue}:{label:string;value:number;min:number;max:number;setValue:(n:number)=>void}) {return <label className="forecast-slider"><span><strong>{label}</strong><b>${value.toLocaleString()}</b></span><input type="range" min={min} max={max} value={value} onChange={e=>setValue(Number(e.target.value))}/><small><span>${min.toLocaleString()}</span><span>${max.toLocaleString()}</span></small></label>}
+function ForecastSlider({label,value,min,max,setValue}:{label:string;value:number;min:number;max:number;setValue:(n:number)=>void}) {
+  function update(nextValue: number) {
+    setValue(Math.max(min, Math.min(max, Math.round(nextValue || 0))))
+  }
+  return <div className="forecast-slider"><div className="forecast-slider-head"><strong>{label}</strong><label><span>$</span><input type="number" min={min} max={max} value={value} onChange={event=>update(Number(event.target.value))} aria-label={`${label} dollar amount`}/></label></div><input type="range" min={min} max={max} value={value} onChange={event=>update(Number(event.target.value))}/><small><span>${min.toLocaleString()}</span><span>${max.toLocaleString()}</span></small></div>
+}
 
 function Statements() {
   return <StatementProcessingWorkspace />

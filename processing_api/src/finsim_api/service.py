@@ -324,8 +324,6 @@ class ProcessingService:
         ordered = sorted(set(periods))
         if len(ordered) < MINIMUM_STATEMENTS:
             raise ValueError("Statements must cover at least three distinct monthly periods")
-        if any(current - previous != 1 for previous, current in zip(ordered, ordered[1:])):
-            raise ValueError("Statements must cover consecutive monthly periods")
 
     @staticmethod
     def _category_review_rows(job: JobRecord) -> list[ProcessedTransaction]:

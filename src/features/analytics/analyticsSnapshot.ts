@@ -139,7 +139,7 @@ export const emptyAccountSnapshot: AnalyticsSnapshot = {
     spending_trends: [],
     anomaly_candidates: [],
     forecast: null,
-    warnings: ['Upload at least three consecutive monthly statements to build your first financial picture.'],
+    warnings: ['Upload at least three monthly statements to build your first financial picture. Consecutive months are preferred for stronger trends.'],
   },
 }
 

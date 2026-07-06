@@ -184,23 +184,37 @@ export default function StatementProcessingWorkspace() {
     const pdfs = selected.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
     if (pdfs.length !== selected.length) {
       setError('Only PDF statements can be added to this workflow.')
+      if (inputRef.current) inputRef.current.value = ''
       return
     }
     if (pdfs.some((file) => file.size > maximumStatementBytes)) {
       setError('Each statement must be 25 MB or smaller.')
+      if (inputRef.current) inputRef.current.value = ''
       return
     }
-    if (pdfs.length > 12) {
-      setError('Add no more than 12 monthly statements at one time.')
+    const existing = selectedFiles
+    const merged = [...existing]
+    for (const file of pdfs) {
+      const isDuplicate = merged.some((existingFile) => (
+        existingFile.name === file.name
+        && existingFile.size === file.size
+        && existingFile.lastModified === file.lastModified
+      ))
+      if (!isDuplicate) merged.push(file)
+    }
+    if (merged.length > 12) {
+      setError('Add no more than 12 monthly statements in one processing run.')
+      if (inputRef.current) inputRef.current.value = ''
       return
     }
     if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
-    setFiles(toStatementFiles(pdfs))
-    setSelectedFiles(pdfs)
+    setFiles(toStatementFiles(merged))
+    setSelectedFiles(merged)
     setSampleMode(false)
     setJobId(null)
     setError('')
     setJobState('idle')
+    if (inputRef.current) inputRef.current.value = ''
   }
 
   async function startProcessing() {
@@ -309,7 +323,7 @@ export default function StatementProcessingWorkspace() {
       <article className="panel upload-workspace">
         <div className="workspace-heading">
           <span className="workspace-icon"><Upload /></span>
-          <div><span className="overline">MONTHLY STATEMENTS</span><h2>Add at least three consecutive months</h2><p>Statement periods are confirmed after parsing. Selected PDFs are sent only to the local FinSim processing service.</p></div>
+          <div><span className="overline">MONTHLY STATEMENTS</span><h2>Add at least three monthly statements</h2><p>Consecutive months are preferred for stronger trends and forecasts, but non-consecutive statements can still be processed.</p></div>
         </div>
 
         <input
@@ -324,13 +338,13 @@ export default function StatementProcessingWorkspace() {
         {files.length === 0 ? <div className="statement-dropzone">
           <FileText />
           <strong>Select monthly statement PDFs</strong>
-          <span>Three files minimum for a first financial picture</span>
+          <span>Three files minimum. Consecutive months are preferred, not required.</span>
           <div>
             <button className="button button-primary" onClick={() => inputRef.current?.click()}>Choose PDFs</button>
             <button className="button button-secondary" onClick={useSafeSamples}>Use safe sample files</button>
           </div>
         </div> : <div className="selected-statements">
-          <div className="selected-summary"><strong>{files.length} statements selected</strong><button onClick={() => inputRef.current?.click()}>Replace files</button></div>
+          <div className="selected-summary"><strong>{files.length} statements selected</strong><button onClick={() => inputRef.current?.click()}>Add more PDFs</button></div>
           {files.map((file, index) => <div className="selected-file" key={file.id}>
             <span><FileCheck2 /></span>
             <div><strong>{file.name}</strong><small>{file.periodLabel} · {formatFileSize(file.size)}</small></div>
@@ -364,7 +378,7 @@ export default function StatementProcessingWorkspace() {
     <section className="panel statement-guidance-panel">
       <div className="panel-head"><div><span className="overline">WHAT HAPPENS NEXT</span><h2>Your report is built in four clear checks</h2></div><span className="integration-badge">{files.length >= minimumStatementCount ? 'Ready to process' : `${minimumStatementCount - files.length} more needed`}</span></div>
       <div className="job-stages guidance-stages">
-        <div className={files.length >= minimumStatementCount ? 'job-stage done' : 'job-stage'}><span>{files.length >= minimumStatementCount ? <Check /> : '1'}</span><div><strong>Statement coverage</strong><small>Use at least three consecutive months so trends and forecasts have context.</small></div></div>
+        <div className={files.length >= minimumStatementCount ? 'job-stage done' : 'job-stage'}><span>{files.length >= minimumStatementCount ? <Check /> : '1'}</span><div><strong>Statement coverage</strong><small>Use at least three months. Consecutive months are preferred for stronger forecast context.</small></div></div>
         <div className={jobState === 'processing' || jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? 'job-stage active' : 'job-stage'}><span>{jobState === 'processing' ? <LoaderCircle className="spin" /> : '2'}</span><div><strong>Transaction reading</strong><small>FinSim extracts dates, descriptions, amounts and balances from each PDF.</small></div></div>
         <div className={jobState === 'review' ? 'job-stage active' : jobState === 'finalizing' || jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'review' ? <RefreshCw /> : jobState === 'finalizing' || jobState === 'complete' ? <Check /> : '3'}</span><div><strong>Merchant review</strong><small>Only unclear merchants ask for your input, and repeated merchants are grouped.</small></div></div>
         <div className={jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'complete' ? <Check /> : '4'}</span><div><strong>Insights ready</strong><small>Spending mix, unusual charges and next month forecast update after processing.</small></div></div>

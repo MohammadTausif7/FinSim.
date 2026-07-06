@@ -271,7 +271,7 @@ class ProcessingApiTests(unittest.TestCase):
         self.assertEqual(job["status"], "review")
         self.assertEqual(job["transaction_count"], 6)
 
-    def test_month_gaps_and_non_pdf_content_are_rejected(self) -> None:
+    def test_month_gaps_are_allowed_but_non_pdf_content_is_rejected(self) -> None:
         gap = self.client.post(
             "/api/processing-jobs",
             files=sample_files((1, 2, 4)),
@@ -282,8 +282,8 @@ class ProcessingApiTests(unittest.TestCase):
             f"/api/processing-jobs/{gap.json()['job_id']}",
             headers=self.headers,
         ).json()
-        self.assertEqual(gap_job["status"], "error")
-        self.assertIn("consecutive", gap_job["error"])
+        self.assertEqual(gap_job["status"], "review")
+        self.assertEqual(gap_job["transaction_count"], 3)
 
         invalid = self.client.post(
             "/api/processing-jobs",

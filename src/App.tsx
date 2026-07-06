@@ -150,6 +150,13 @@ function compactMoney(value: number) {
   return formatMoney(value)
 }
 
+function analysisPeriodLabel(snapshot: AnalyticsSnapshot) {
+  const months = Array.from(new Set(snapshot.analytics.monthly_summaries.map((row) => row.month))).sort()
+  if (!months.length) return 'No statement period yet'
+  if (months.length === 1) return `${formatMonthLabel(months[0])} analysis`
+  return `${formatMonthLabel(months[0])} to ${formatMonthLabel(months.at(-1)!)} · ${months.length} months`
+}
+
 function snapshotStorageId(snapshot: AnalyticsSnapshot) {
   return `${snapshot.source}-${snapshot.updatedAt}-${snapshot.transactionCount}`
 }
@@ -538,7 +545,7 @@ function Landing({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) =
         <section className="how section-pad" id="how-it-works">
           <div className="section-heading"><span className="overline">FROM PDF TO PERSPECTIVE</span><h2>Your finances, understood<br/>in three quiet steps.</h2><p>FinSim does the tedious work so you can spend your energy on better decisions.</p></div>
           <div className="steps-grid">
-            <article><span className="step-number">01</span><div className="step-icon"><Upload /></div><h3>Drop in your statements</h3><p>Start with at least three consecutive monthly PDF statements so FinSim can build a first financial picture.</p><span className="micro-chip"><FileText size={13} /> statement.pdf <Check size={13} /></span></article>
+            <article><span className="step-number">01</span><div className="step-icon"><Upload /></div><h3>Drop in your statements</h3><p>Start with at least three monthly PDF statements. Consecutive months are preferred for stronger trends.</p><span className="micro-chip"><FileText size={13} /> statement.pdf <Check size={13} /></span></article>
             <article><span className="step-number">02</span><div className="step-icon"><Zap /></div><h3>We make sense of it</h3><p>Transactions are cleaned, matched and categorized into a reliable financial timeline.</p><div className="category-mini"><span>COFFEE SHOP <i>Dining</i></span><span>AMZN MKTPLACE <i>Shopping</i></span></div></article>
             <article><span className="step-number">03</span><div className="step-icon"><TrendingUp /></div><h3>See what comes next</h3><p>Explore trends, surface unusual activity, and model next month's likely spending.</p><div className="forecast-mini"><span>Next month</span><strong>$2,340 to $2,680</strong><svg viewBox="0 0 200 34"><path d="M0 28 C35 25,42 6,76 15 S110 30,140 13 S176 15,200 3" /></svg></div></article>
           </div>
@@ -706,7 +713,7 @@ function Analytics() {
   if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
     return <>
       <PageHeader eyebrow="DETAILED ANALYSIS" title="No analysis yet."/>
-      <EmptyWorkspace title="Your analytics will appear after statement processing." message="Upload at least three consecutive monthly statements. Once processing finishes, this page will show monthly comparisons, category mix, spending trends and anomaly candidates." />
+      <EmptyWorkspace title="Your analytics will appear after statement processing." message="Upload at least three monthly statements. Consecutive months are preferred, and once processing finishes this page will show comparisons, category mix, trends and anomaly candidates." />
     </>
   }
   const current = latestMonth(snapshot)
@@ -718,7 +725,7 @@ function Analytics() {
   const recent = transactionPreview(snapshot)
   const patterns = insightPatterns(snapshot, rows, trend, anomalyCount)
   const chartData = monthlySeries(snapshot, chartMetric, chartWindow)
-  return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact">{formatMonthLabel(current.month)} <ChevronRight size={15}/></button></PageHeader>
+  return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact analysis-period-badge">{analysisPeriodLabel(snapshot)} <ChevronRight size={15}/></button></PageHeader>
     <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
     <div className="metric-grid three"><MetricCard label="AVERAGE ROW SPEND" value={formatMoney(dailySpend)} detail="monthly spend divided by rows" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALIES" value={anomalyCount ? String(anomalyCount) : '0'} detail={anomalyCount ? 'open transaction review' : 'No anomalies, all verified'} icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
     <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>setChartWindow(Number(event.target.value))} aria-label="Chart period"><option value={3}>Last 3 months</option><option value={6}>Last 6 months</option><option value={12}>Last 12 months</option></select></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div>{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</article></div>
@@ -743,7 +750,7 @@ function Forecast() {
   if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
     return <>
       <PageHeader eyebrow="FORECAST" title="Forecast needs history."/>
-      <EmptyWorkspace title="Upload statements to unlock next month ranges." message="FinSim needs at least three consecutive months before it can build a useful forecast and scenario simulator." />
+      <EmptyWorkspace title="Upload statements to unlock next month ranges." message="FinSim needs at least three monthly statements before it can build a useful forecast and scenario simulator. Consecutive months improve the result." />
     </>
   }
   const forecastExpected = forecast.expected

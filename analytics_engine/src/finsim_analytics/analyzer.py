@@ -56,7 +56,7 @@ def _monthly_summaries(transactions: list[ProcessedTransaction]) -> list[Monthly
     summaries: list[MonthlySummary] = []
     for month in sorted(buckets):
         rows = buckets[month]
-        income = sum((row.amount for row in rows if row.amount > 0), Decimal("0.00"))
+        income = sum((row.income_amount for row in rows), Decimal("0.00"))
         spending = sum((row.spend_amount for row in rows), Decimal("0.00"))
         net = income - spending
         summaries.append(

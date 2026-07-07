@@ -25,12 +25,21 @@ def fake_parser(path: Path) -> ParseResult:
     marker = path.read_bytes().decode("latin-1")
     month = next(month for month in range(1, 13) if f"MONTH={month}" in marker)
     account = next(value for value in range(1, 13) if f"ACCOUNT={value}" in marker)
+    amount_match = next((value for value in ("100.00", "-100.00", "-20.00") if f"AMOUNT={value}" in marker), None)
+    amount = Decimal(amount_match or "-20.00")
+    description = (
+        "Mobile Banking payment to credit card"
+        if "DESC=CARDPAYMENT" in marker
+        else "Credit card payment received"
+        if "DESC=PAYMENTRECEIVED" in marker
+        else "LOCAL SAMPLE MERCHANT"
+    )
     transaction = Transaction(
         transaction_id=f"sample-{account}-{month}",
         posted_at=date(2026, month, 10),
-        description_raw="LOCAL SAMPLE MERCHANT",
-        amount=Decimal("-20.00"),
-        transaction_type="debit",
+        description_raw=description,
+        amount=amount,
+        transaction_type="credit" if amount > 0 else "debit",
         source_statement_id=f"statement-{account}-{month}",
         page_number=1,
     )
@@ -60,6 +69,43 @@ def sample_files(months: tuple[int, ...] = (1, 2, 3)):
             ),
         )
         for position, month in enumerate(months, start=1)
+    ]
+
+
+def internal_transfer_files():
+    return [
+        (
+            "files",
+            (
+                "checking-jan.pdf",
+                b"%PDF-1.7 MONTH=1 ACCOUNT=1 AMOUNT=-100.00 DESC=CARDPAYMENT",
+                "application/pdf",
+            ),
+        ),
+        (
+            "files",
+            (
+                "card-jan.pdf",
+                b"%PDF-1.7 MONTH=1 ACCOUNT=2 AMOUNT=100.00 DESC=PAYMENTRECEIVED",
+                "application/pdf",
+            ),
+        ),
+        (
+            "files",
+            (
+                "checking-feb.pdf",
+                b"%PDF-1.7 MONTH=2 ACCOUNT=1",
+                "application/pdf",
+            ),
+        ),
+        (
+            "files",
+            (
+                "checking-mar.pdf",
+                b"%PDF-1.7 MONTH=3 ACCOUNT=1",
+                "application/pdf",
+            ),
+        ),
     ]
 
 
@@ -270,6 +316,46 @@ class ProcessingApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 202)
         self.assertEqual(job["status"], "review")
         self.assertEqual(job["transaction_count"], 6)
+
+    def test_same_month_cross_account_transfer_is_excluded_from_spending(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            files=internal_transfer_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 202)
+        job_id = created.json()["job_id"]
+        review = self.client.get(
+            f"/api/processing-jobs/{job_id}/review",
+            headers=self.headers,
+        ).json()
+        decisions = [
+            {
+                "transaction_ids": item["transaction_ids"],
+                "category": "Shopping",
+                "remember_merchant": False,
+            }
+            for item in review["items"]
+        ]
+        updated = self.client.post(
+            f"/api/processing-jobs/{job_id}/feedback",
+            json=decisions,
+            headers=self.headers,
+        )
+        self.assertEqual(updated.status_code, 200)
+        result = self.client.get(
+            f"/api/processing-jobs/{job_id}/result",
+            headers=self.headers,
+        ).json()
+        january = next(row for row in result["analytics"]["monthly_summaries"] if row["month"] == "2026-01")
+        self.assertEqual(january["income"], "0.00")
+        self.assertEqual(january["spending"], "0.00")
+        self.assertEqual(result["quality_report"]["internal_transfer_matches"], 1)
+        matched = [
+            row for row in result["transactions"]
+            if row["category_source"] == "internal_match"
+        ]
+        self.assertEqual(len(matched), 2)
 
     def test_month_gaps_are_allowed_but_non_pdf_content_is_rejected(self) -> None:
         gap = self.client.post(

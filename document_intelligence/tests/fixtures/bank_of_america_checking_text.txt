@@ -1,0 +1,26 @@
+P.O. Box 15284 Customer service information
+Bank of America, N.A.
+Your Adv SafeBalance Banking
+for July 16, 2025 to August 13, 2025 Account number: 0000 0000 0000
+Account summary
+Beginning balance on July 16, 2025 $2,482.21
+Deposits and other additions 1,721.69
+Other subtractions -2,305.18
+Ending balance on August 13, 2025 $1,898.72
+Deposits and other additions
+Date Description Amount
+07/22/25 Zelle payment from SAMPLE PERSON Conf# abc123 500.00
+07/25/25 OU PAYROLL DES:PAYROLL ID:111111 INDN:Sample Person CO ID:222222 491.13
+PPD
+07/28/25 Zelle payment from SAMPLE FRIEND for "thanks"; Conf# def456 25.00
+08/08/25 OU PAYROLL DES:PAYROLL ID:111111 INDN:Sample Person CO ID:222222 705.56
+PPD
+Total deposits and other additions $1,721.69
+Withdrawals and other subtractions
+Other subtractions
+Date Description Amount
+07/18/25 Mobile Banking payment to CRD 4377 Confirmation# pay111 -673.54
+07/23/25 Zelle payment to Sample Friend Conf# zelle111 -500.00
+07/23/25 Zelle payment to Another Friend Conf# zelle222 -25.00
+08/11/25 Mobile Banking payment to CRD 4377 Confirmation# pay222 -1,106.64
+Total other subtractions -$2,305.18

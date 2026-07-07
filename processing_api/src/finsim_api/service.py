@@ -6,7 +6,7 @@ import hashlib
 import shutil
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -21,6 +21,7 @@ from finsim_transactions import apply_feedback, process_files
 from finsim_transactions.cleaning import normalize_description
 from finsim_transactions.feedback import FeedbackAuditRecord, FeedbackError, parse_feedback_payload
 from finsim_transactions.models import ProcessedTransaction, QualityReport
+from finsim_transactions.processor import update_quality_report
 from finsim_transactions.rules import available_categories, load_rulebook
 
 from .review import review_reasons, review_suggestions, review_summary
@@ -160,6 +161,11 @@ class ProcessingService:
                 csv_paths,
                 merchant_rules=job.merchant_rules,
             )
+            self._set_progress(job, "match", 94)
+            transactions, internal_matches = self._mark_internal_transfers(transactions)
+            if internal_matches:
+                report.internal_transfer_matches = internal_matches
+                update_quality_report(transactions, report)
             with self._lock:
                 job.transactions = transactions
                 job.report = report
@@ -397,9 +403,65 @@ class ProcessingService:
                 category=row.category,
                 category_confidence=row.category_confidence,
                 needs_review=row.needs_review,
+                category_source=row.category_source,
             )
             for row in rows
         ]
+
+    @staticmethod
+    def _mark_internal_transfers(
+        rows: list[ProcessedTransaction],
+    ) -> tuple[list[ProcessedTransaction], int]:
+        matched_indexes: set[int] = set()
+        credit_indexes: dict[tuple[str, Decimal], list[int]] = {}
+        for index, row in enumerate(rows):
+            if row.source.amount <= 0:
+                continue
+            key = (row.source.posted_at.strftime("%Y-%m"), row.source.amount.copy_abs())
+            credit_indexes.setdefault(key, []).append(index)
+
+        pairs = 0
+        for debit_index, debit in enumerate(rows):
+            if debit.source.amount >= 0 or debit_index in matched_indexes:
+                continue
+            key = (debit.source.posted_at.strftime("%Y-%m"), debit.source.amount.copy_abs())
+            for credit_index in credit_indexes.get(key, []):
+                if credit_index in matched_indexes:
+                    continue
+                credit = rows[credit_index]
+                if credit.source.source_statement_id == debit.source.source_statement_id:
+                    continue
+                days_apart = abs((credit.source.posted_at - debit.source.posted_at).days)
+                if days_apart > 3:
+                    continue
+                if days_apart and not (
+                    _looks_like_internal_movement(debit)
+                    or _looks_like_internal_movement(credit)
+                ):
+                    continue
+                matched_indexes.update({debit_index, credit_index})
+                pairs += 1
+                break
+
+        if not matched_indexes:
+            return rows, 0
+
+        marked: list[ProcessedTransaction] = []
+        for index, row in enumerate(rows):
+            if index not in matched_indexes:
+                marked.append(row)
+                continue
+            marked.append(
+                replace(
+                    row,
+                    source=replace(row.source, transaction_type="transfer"),
+                    category="Transfers",
+                    category_source="internal_match",
+                    category_confidence=Decimal("1.00"),
+                    needs_review=False,
+                )
+            )
+        return marked, pairs
 
     def _persist_if_complete(self, job: JobRecord) -> None:
         if (
@@ -422,3 +484,23 @@ class ProcessingService:
     @staticmethod
     def _remove_workspace(job: JobRecord) -> None:
         shutil.rmtree(job.workspace, ignore_errors=True)
+
+
+def _looks_like_internal_movement(row: ProcessedTransaction) -> bool:
+    searchable = normalize_description(
+        f"{row.source.description_raw} {row.merchant_clean} {row.source.transaction_type} {row.category}"
+    )
+    markers = (
+        "TRANSFER",
+        "PAYMENT",
+        "AUTOPAY",
+        "AUTO PAY",
+        "CREDIT CARD",
+        "CRD",
+        "CARD",
+        "ONLINE",
+        "MOBILE BANKING",
+        "BANK",
+        "ACH",
+    )
+    return any(marker in searchable for marker in markers)

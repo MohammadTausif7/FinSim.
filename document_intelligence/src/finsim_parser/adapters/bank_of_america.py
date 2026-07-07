@@ -15,12 +15,19 @@ from ..text_utils import MONEY_PATTERN, clean_space, infer_date, money, stable_t
 
 DATE_ROW = re.compile(r"^\s*(\d{1,2})/(\d{1,2})\s+(\d{1,2})/(\d{1,2})\s+(.+)$")
 REFERENCE_COLUMNS = re.compile(r"\s+\d{4}\s+\d{4}$")
-PERIOD = re.compile(
+CARD_PERIOD = re.compile(
     r"([A-Za-z]+)\s+(\d{1,2})\s+-\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})",
+    re.IGNORECASE,
+)
+DEPOSIT_PERIOD = re.compile(
+    r"for\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})\s+to\s+([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})",
     re.IGNORECASE,
 )
 PREVIOUS_BALANCE = re.compile(r"Previous\s+Balance\s+\$?([\d,]+\.\d{2})", re.IGNORECASE)
 NEW_BALANCE = re.compile(r"New\s+Balance\s+Total\s+\$?([\d,]+\.\d{2})", re.IGNORECASE)
+BEGINNING_BALANCE = re.compile(r"Beginning\s+balance\s+on\s+.+?\s+\$?([\d,]+\.\d{2})", re.IGNORECASE)
+ENDING_BALANCE = re.compile(r"Ending\s+balance\s+on\s+.+?\s+\$?([\d,]+\.\d{2})", re.IGNORECASE)
+DEPOSIT_ROW = re.compile(r"^\s*(\d{2})/(\d{2})/(\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})\s*$")
 
 
 class BankOfAmericaAdapter(StatementAdapter):
@@ -32,6 +39,8 @@ class BankOfAmericaAdapter(StatementAdapter):
         return "BANKOFAMERICA" in upper and (
             "PURCHASESANDADJUSTMENTS" in upper
             or "ACCOUNTSUMMARY/PAYMENTINFORMATION" in upper
+            or "ADVSAFEBALANCEBANKING" in upper
+            or "DEPOSITSANDOTHERADDITIONS" in upper
         )
 
     def parse(
@@ -41,6 +50,9 @@ class BankOfAmericaAdapter(StatementAdapter):
         source_path: Path,
     ) -> tuple[StatementMetadata, list[Transaction], list[str]]:
         combined = "\n".join(page.text for page in pages)
+        if self._is_deposit_statement(combined):
+            return self._parse_deposit_statement(pages, combined, source_statement_id, source_path)
+
         period_start, period_end = self._period(combined)
         warnings: list[str] = []
         if period_end is None:
@@ -127,14 +139,110 @@ class BankOfAmericaAdapter(StatementAdapter):
         return metadata, transactions, warnings
 
     @staticmethod
+    def _is_deposit_statement(text: str) -> bool:
+        upper = text.upper()
+        return "DEPOSITS AND OTHER ADDITIONS" in upper or "ADV SAFEBALANCE BANKING" in upper
+
+    def _parse_deposit_statement(
+        self,
+        pages: list[PageText],
+        combined: str,
+        source_statement_id: str,
+        source_path: Path,
+    ) -> tuple[StatementMetadata, list[Transaction], list[str]]:
+        period_start, period_end = self._deposit_period(combined)
+        warnings: list[str] = []
+        if period_end is None:
+            period_end = datetime.fromtimestamp(source_path.stat().st_mtime).date()
+            warnings.append("Statement period was not found. File modification year was used.")
+
+        metadata = StatementMetadata(
+            institution=self.institution,
+            account_type="checking",
+            period_start=period_start,
+            period_end=period_end,
+            beginning_balance=self._first_money(BEGINNING_BALANCE, combined),
+            ending_balance=self._first_money(ENDING_BALANCE, combined),
+            source_statement_id=source_statement_id,
+            extraction_method=pages[0].method if pages else "unknown",
+            page_count=len(pages),
+        )
+
+        transactions: list[Transaction] = []
+        section = "unknown"
+        for page in pages:
+            for raw_line in page.text.splitlines():
+                line = clean_space(raw_line)
+                lowered = line.lower()
+                if lowered == "deposits and other additions":
+                    section = "credits"
+                    continue
+                if lowered == "other subtractions":
+                    section = "debits"
+                    continue
+                if lowered.startswith("total ") or lowered in {"date description amount", "withdrawals and other subtractions"}:
+                    continue
+                if section not in {"credits", "debits"}:
+                    continue
+
+                match = DEPOSIT_ROW.match(line)
+                if not match:
+                    continue
+                month_number, day_number, year_suffix, body, printed_amount_text = match.groups()
+                posted_at = infer_date(int(month_number), int(day_number), period_end)
+                if posted_at.year % 100 != int(year_suffix):
+                    posted_at = datetime.strptime(
+                        f"{month_number}/{day_number}/{year_suffix}",
+                        "%m/%d/%y",
+                    ).date()
+                amount = money(printed_amount_text)
+                if amount == 0:
+                    continue
+                kind = self._deposit_kind(body, amount, section)
+                ordinal = len(transactions)
+                transactions.append(
+                    Transaction(
+                        transaction_id=stable_transaction_id(
+                            source_statement_id,
+                            posted_at,
+                            body,
+                            amount,
+                            ordinal,
+                        ),
+                        posted_at=posted_at,
+                        description_raw=clean_space(body),
+                        amount=amount,
+                        transaction_type=kind,
+                        source_statement_id=source_statement_id,
+                        page_number=page.page_number,
+                        extraction_method=page.method,
+                        extraction_confidence=Decimal(str(page.confidence)),
+                    )
+                )
+
+        if not transactions:
+            warnings.append("No transaction rows were found in the Bank of America deposit statement.")
+        return metadata, transactions, warnings
+
+    @staticmethod
     def _period(text: str):
-        match = PERIOD.search(text)
+        match = CARD_PERIOD.search(text)
         if not match:
             return None, None
         start_month, start_day, end_month, end_day, end_year = match.groups()
         end = datetime.strptime(f"{end_month} {end_day} {end_year}", "%B %d %Y").date()
         start_year = end.year - 1 if datetime.strptime(start_month, "%B").month > end.month else end.year
         start = datetime.strptime(f"{start_month} {start_day} {start_year}", "%B %d %Y").date()
+        return start, end
+
+    @staticmethod
+    def _deposit_period(text: str):
+        match = DEPOSIT_PERIOD.search(text)
+        if not match:
+            return None, None
+        start_month, start_day, start_year, end_month, end_day, end_year = match.groups()
+        start = datetime.strptime(f"{start_month} {start_day} {start_year}", "%B %d %Y").date()
+        end = datetime.strptime(f"{end_month} {end_day} {end_year}", "%B %d %Y").date()
         return start, end
 
     @staticmethod
@@ -153,3 +261,14 @@ class BankOfAmericaAdapter(StatementAdapter):
         if section == "interest":
             return -printed_amount, "interest"
         return -printed_amount, "debit"
+
+    @staticmethod
+    def _deposit_kind(description: str, amount: Decimal, section: str):
+        normalized = description.upper()
+        if "ZELLE" in normalized or "TRANSFER" in normalized or "CRD " in normalized:
+            return "transfer"
+        if "PAYROLL" in normalized or "DIRECT DEP" in normalized:
+            return "credit"
+        if section == "credits" or amount > 0:
+            return "credit"
+        return "debit"

@@ -32,7 +32,8 @@ export const processingStages = [
   { id: 'extract', label: 'Finding transactions', detail: 'Reading the purchases, deposits and transfers in each statement', progress: 42 },
   { id: 'periods', label: 'Confirming the months', detail: 'Making sure the statements cover separate monthly periods', progress: 58 },
   { id: 'clean', label: 'Cleaning merchant names', detail: 'Combining duplicate rows and making descriptions easier to read', progress: 74 },
-  { id: 'categorizing', label: 'Grouping spending', detail: 'Placing transactions into clear financial categories', progress: 90 },
+  { id: 'categorize', label: 'Grouping spending', detail: 'Placing transactions into clear financial categories', progress: 88 },
+  { id: 'match', label: 'Matching account movement', detail: 'Finding credit card payments and transfers across same-month statements', progress: 94 },
 ] as const
 
 export const sampleStatements: StatementFile[] = [

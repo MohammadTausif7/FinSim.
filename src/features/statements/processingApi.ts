@@ -91,6 +91,7 @@ export type ProcessingResult = {
   quality_report: {
     output_rows: number
     review_rows: number
+    internal_transfer_matches?: number
     warnings: string[]
   }
   analytics: AnalyticsReport

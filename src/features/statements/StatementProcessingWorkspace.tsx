@@ -37,6 +37,8 @@ import {
 import { refreshSavedAccountAnalytics, saveProcessingResult } from '../analytics/analyticsSnapshot'
 import { getSessionToken } from '../account/accountApi'
 
+type UploadMode = 'single' | 'multiple' | 'credit'
+
 function toStatementFiles(files: File[]) {
   return files.map((file, index): StatementFile => ({
     id: `${file.name}-${file.lastModified}-${index}`,
@@ -70,6 +72,8 @@ export default function StatementProcessingWorkspace() {
   const jobIdRef = useRef<string | null>(null)
   const [files, setFiles] = useState<StatementFile[]>([])
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [uploadMode, setUploadMode] = useState<UploadMode>('multiple')
   const [sampleMode, setSampleMode] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [jobState, setJobState] = useState<JobState>('idle')
@@ -80,7 +84,7 @@ export default function StatementProcessingWorkspace() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [rememberMerchant, setRememberMerchant] = useState(true)
   const [availableCategories, setAvailableCategories] = useState(allCategories)
-  const [completion, setCompletion] = useState({ cleaned: 0, confirmed: 0, warnings: 0 })
+  const [completion, setCompletion] = useState({ cleaned: 0, confirmed: 0, warnings: 0, internalTransfers: 0 })
 
   const unresolved = useMemo(
     () => reviewItems.filter((item) => !item.resolvedCategory),
@@ -146,6 +150,7 @@ export default function StatementProcessingWorkspace() {
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
             warnings: result.quality_report.warnings.length,
+            internalTransfers: result.quality_report.internal_transfer_matches || 0,
           })
           setJobState('finalizing')
           return
@@ -217,6 +222,12 @@ export default function StatementProcessingWorkspace() {
     if (inputRef.current) inputRef.current.value = ''
   }
 
+  function chooseUploadMode(mode: UploadMode) {
+    setUploadMode(mode)
+    setUploadDialogOpen(false)
+    window.setTimeout(() => inputRef.current?.click(), 0)
+  }
+
   async function startProcessing() {
     if (files.length < minimumStatementCount) {
       setError(`Add at least ${minimumStatementCount} monthly statements to build the first financial picture.`)
@@ -260,6 +271,7 @@ export default function StatementProcessingWorkspace() {
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
             warnings: result.quality_report.warnings.length,
+            internalTransfers: result.quality_report.internal_transfer_matches || 0,
           })
         }
       } catch (caught) {
@@ -299,6 +311,7 @@ export default function StatementProcessingWorkspace() {
     if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
     setFiles(sampleStatements)
     setSelectedFiles([])
+    setUploadMode('multiple')
     setSampleMode(true)
     setJobId(null)
     setError('')
@@ -338,13 +351,13 @@ export default function StatementProcessingWorkspace() {
         {files.length === 0 ? <div className="statement-dropzone">
           <FileText />
           <strong>Select monthly statement PDFs</strong>
-          <span>Three files minimum. Consecutive months are preferred, not required.</span>
+          <span>Three monthly periods minimum. You can mix checking, savings and credit card statements.</span>
           <div>
-            <button className="button button-primary" onClick={() => inputRef.current?.click()}>Choose PDFs</button>
+            <button className="button button-primary" onClick={() => setUploadDialogOpen(true)}>Choose PDFs</button>
             <button className="button button-secondary" onClick={useSafeSamples}>Use safe sample files</button>
           </div>
         </div> : <div className="selected-statements">
-          <div className="selected-summary"><strong>{files.length} statements selected</strong><button onClick={() => inputRef.current?.click()}>Add more PDFs</button></div>
+          <div className="selected-summary"><strong>{files.length} statements selected</strong><span>{uploadMode === 'single' ? 'Single account' : uploadMode === 'credit' ? 'Credit card statements' : 'Multiple accounts'}</span><button onClick={() => setUploadDialogOpen(true)}>Add more PDFs</button></div>
           {files.map((file, index) => <div className="selected-file" key={file.id}>
             <span><FileCheck2 /></span>
             <div><strong>{file.name}</strong><small>{file.periodLabel} · {formatFileSize(file.size)}</small></div>
@@ -369,7 +382,7 @@ export default function StatementProcessingWorkspace() {
           <h2>{jobState === 'idle' && 'Waiting for statements'}{jobState === 'processing' && processingStages[stageIndex].label}{jobState === 'review' && `${unresolved.length} ${unresolved.length === 1 ? 'transaction needs' : 'transactions need'} your help`}{jobState === 'finalizing' && 'Applying your choices'}{jobState === 'complete' && 'Your categorized data is ready'}</h2>
           <p>{jobState === 'idle' && 'Choose files to start building your spending picture.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim found a few transactions where your input will improve the report.'}{jobState === 'finalizing' && 'Your report is being refreshed with the confirmed categories.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'Insights and forecast are ready to review.')}</p>
           {jobState === 'review' && <button className="button button-primary button-compact" onClick={() => setReviewOpen(true)}>Review merchants <ArrowRight /></button>}
-          {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
+          {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><Sparkles /> {sampleMode ? 0 : completion.internalTransfers} account transfers matched</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
           {jobState === 'complete' && !sampleMode && <a className="button button-primary button-compact analytics-ready-link" href="/analytics">View analytics <ArrowRight /></a>}
         </div>
       </article>
@@ -380,11 +393,27 @@ export default function StatementProcessingWorkspace() {
       <div className="job-stages guidance-stages">
         <div className={files.length >= minimumStatementCount ? 'job-stage done' : 'job-stage'}><span>{files.length >= minimumStatementCount ? <Check /> : '1'}</span><div><strong>Statement coverage</strong><small>Use at least three months. Consecutive months are preferred for stronger forecast context.</small></div></div>
         <div className={jobState === 'processing' || jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? 'job-stage active' : 'job-stage'}><span>{jobState === 'processing' ? <LoaderCircle className="spin" /> : '2'}</span><div><strong>Transaction reading</strong><small>FinSim extracts dates, descriptions, amounts and balances from each PDF.</small></div></div>
-        <div className={jobState === 'review' ? 'job-stage active' : jobState === 'finalizing' || jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'review' ? <RefreshCw /> : jobState === 'finalizing' || jobState === 'complete' ? <Check /> : '3'}</span><div><strong>Merchant review</strong><small>Only unclear merchants ask for your input, and repeated merchants are grouped.</small></div></div>
-        <div className={jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'complete' ? <Check /> : '4'}</span><div><strong>Insights ready</strong><small>Spending mix, unusual charges and next month forecast update after processing.</small></div></div>
+        <div className={jobState === 'processing' || jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? 'job-stage active' : 'job-stage'}><span>{jobState === 'processing' ? '3' : jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? <Check /> : '3'}</span><div><strong>Account matching</strong><small>Same-month payments and transfers across accounts are matched so they do not inflate spending.</small></div></div>
+        <div className={jobState === 'review' ? 'job-stage active' : jobState === 'finalizing' || jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'review' ? <RefreshCw /> : jobState === 'finalizing' || jobState === 'complete' ? <Check /> : '4'}</span><div><strong>Merchant review</strong><small>Only unclear merchants ask for your input, and repeated merchants are grouped.</small></div></div>
       </div>
       <p className="statement-privacy-copy"><ShieldCheck size={15}/> FinSim does not ask for bank credentials. Uploaded statements are used only to create your report.</p>
     </section>
+
+    {uploadDialogOpen && <div className="review-backdrop" role="presentation">
+      <section className="upload-choice-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-choice-title">
+        <div className="review-dialog-head">
+          <div><span className="overline">ADD STATEMENTS</span><h2 id="upload-choice-title">What are you uploading?</h2></div>
+          <button autoFocus onClick={() => setUploadDialogOpen(false)} aria-label="Close upload options"><X /></button>
+        </div>
+        <p>Choose the closest option. FinSim still checks every PDF and looks for same-month transfers or card payments across accounts.</p>
+        <div className="upload-choice-grid">
+          <button type="button" onClick={() => chooseUploadMode('single')}><FileText /><strong>Single bank account</strong><span>Checking or savings statements from one account.</span></button>
+          <button type="button" onClick={() => chooseUploadMode('multiple')}><Sparkles /><strong>Multiple accounts</strong><span>Best for checking, savings and transfers between your own accounts.</span></button>
+          <button type="button" onClick={() => chooseUploadMode('credit')}><FileCheck2 /><strong>Credit card statements</strong><span>FinSim matches card payments back to bank account withdrawals when possible.</span></button>
+        </div>
+        <small>Tip: Upload all statements that overlap the same month in one run when you want payment and transfer matching.</small>
+      </section>
+    </div>}
 
     {reviewOpen && currentReview && <div className="review-backdrop" role="presentation">
       <section className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title">

@@ -65,4 +65,5 @@ def _row_to_transaction(row: dict[str, str], line_number: int) -> ProcessedTrans
         category=category,
         category_confidence=confidence,
         needs_review=needs_review,
+        category_source=row.get("category_source", "").strip(),
     )

@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import os
 from typing import Annotated
 
-from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, Response, UploadFile, status
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -195,6 +195,7 @@ def create_app(
     def create_processing_job(
         background_tasks: BackgroundTasks,
         files: Annotated[list[UploadFile], File(description="Three to twelve PDF statements")],
+        upload_mode: Annotated[str, Form()] = "multiple",
         authorization: Annotated[str | None, Header()] = None,
     ) -> dict[str, object]:
         user = _require_user(accounts, authorization)
@@ -207,6 +208,7 @@ def create_app(
                 uploads,
                 user_id=user.user_id,
                 merchant_rules=processing.saved_merchant_rules(user.user_id),
+                upload_mode=upload_mode,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

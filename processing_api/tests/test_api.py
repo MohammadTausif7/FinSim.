@@ -25,6 +25,7 @@ def fake_parser(path: Path) -> ParseResult:
     marker = path.read_bytes().decode("latin-1")
     month = next(month for month in range(1, 13) if f"MONTH={month}" in marker)
     account = next(value for value in range(1, 13) if f"ACCOUNT={value}" in marker)
+    account_type = "credit_card" if "TYPE=credit_card" in marker else "checking"
     amount_match = next((value for value in ("100.00", "-100.00", "-20.00") if f"AMOUNT={value}" in marker), None)
     amount = Decimal(amount_match or "-20.00")
     description = (
@@ -45,7 +46,7 @@ def fake_parser(path: Path) -> ParseResult:
     )
     metadata = StatementMetadata(
         institution="sample_bank",
-        account_type="checking",
+        account_type=account_type,
         period_start=date(2026, month, 1),
         period_end=date(2026, month, 28),
         source_statement_id=f"statement-{account}-{month}",
@@ -65,6 +66,20 @@ def sample_files(months: tuple[int, ...] = (1, 2, 3)):
             (
                 f"statement-{position}-{month}.pdf",
                 f"%PDF-1.7 MONTH={month} ACCOUNT={position}".encode(),
+                "application/pdf",
+            ),
+        )
+        for position, month in enumerate(months, start=1)
+    ]
+
+
+def credit_card_files(months: tuple[int, ...] = (1, 2, 3)):
+    return [
+        (
+            "files",
+            (
+                f"card-{position}-{month}.pdf",
+                f"%PDF-1.7 MONTH={month} ACCOUNT={position} TYPE=credit_card".encode(),
                 "application/pdf",
             ),
         )
@@ -302,6 +317,80 @@ class ProcessingApiTests(unittest.TestCase):
         )
         self.assertEqual(duplicate.status_code, 400)
         self.assertIn("duplicates", duplicate.json()["detail"])
+
+    def test_upload_mode_rejects_bank_statements_in_credit_card_flow(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            data={"upload_mode": "credit"},
+            files=sample_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 202)
+        job = self.client.get(
+            f"/api/processing-jobs/{created.json()['job_id']}",
+            headers=self.headers,
+        ).json()
+        self.assertEqual(job["status"], "error")
+        self.assertIn("credit card option", job["error"])
+
+    def test_upload_mode_accepts_credit_card_statements(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            data={"upload_mode": "credit"},
+            files=credit_card_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 202)
+        job = self.client.get(
+            f"/api/processing-jobs/{created.json()['job_id']}",
+            headers=self.headers,
+        ).json()
+        self.assertEqual(job["status"], "review")
+
+    def test_single_account_mode_rejects_mixed_account_types(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            data={"upload_mode": "single"},
+            files=[
+                *sample_files((1, 2)),
+                credit_card_files((3,))[0],
+            ],
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 202)
+        job = self.client.get(
+            f"/api/processing-jobs/{created.json()['job_id']}",
+            headers=self.headers,
+        ).json()
+        self.assertEqual(job["status"], "error")
+        self.assertIn("Single account uploads cannot mix", job["error"])
+
+    def test_same_statement_content_is_rejected_even_when_pdf_bytes_differ(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            files=[
+                (
+                    "files",
+                    ("statement-original.pdf", b"%PDF-1.7 MONTH=1 ACCOUNT=1 EXPORT=A", "application/pdf"),
+                ),
+                (
+                    "files",
+                    ("renamed-copy.pdf", b"%PDF-1.7 MONTH=1 ACCOUNT=1 EXPORT=B", "application/pdf"),
+                ),
+                (
+                    "files",
+                    ("statement-feb.pdf", b"%PDF-1.7 MONTH=2 ACCOUNT=1", "application/pdf"),
+                ),
+            ],
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 202)
+        job = self.client.get(
+            f"/api/processing-jobs/{created.json()['job_id']}",
+            headers=self.headers,
+        ).json()
+        self.assertEqual(job["status"], "error")
+        self.assertIn("same statement", job["error"])
 
     def test_multiple_accounts_can_cover_the_same_three_months(self) -> None:
         created = self.client.post(

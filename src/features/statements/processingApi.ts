@@ -39,6 +39,8 @@ export type FeedbackDecision = {
   remember_merchant: boolean
 }
 
+export type UploadMode = 'single' | 'multiple' | 'credit'
+
 export type AnalyticsReport = {
   monthly_summaries: Array<{
     month: string
@@ -102,8 +104,9 @@ export type ProcessingResult = {
 
 const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 
-export async function createProcessingJob(files: File[]) {
+export async function createProcessingJob(files: File[], uploadMode: UploadMode = 'multiple') {
   const body = new FormData()
+  body.append('upload_mode', uploadMode)
   files.forEach((file) => body.append('files', file))
   return request<ProcessingJob>('/api/processing-jobs', {
     method: 'POST',

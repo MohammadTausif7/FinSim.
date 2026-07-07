@@ -33,11 +33,10 @@ import {
   getReviewItems,
   submitFeedback,
   type ApiReviewItem,
+  type UploadMode,
 } from './processingApi'
 import { refreshSavedAccountAnalytics, saveProcessingResult } from '../analytics/analyticsSnapshot'
 import { getSessionToken } from '../account/accountApi'
-
-type UploadMode = 'single' | 'multiple' | 'credit'
 
 function toStatementFiles(files: File[]) {
   return files.map((file, index): StatementFile => ({
@@ -72,6 +71,7 @@ export default function StatementProcessingWorkspace() {
   const jobIdRef = useRef<string | null>(null)
   const [files, setFiles] = useState<StatementFile[]>([])
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [selectedFileHashes, setSelectedFileHashes] = useState<string[]>([])
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [uploadMode, setUploadMode] = useState<UploadMode>('multiple')
   const [sampleMode, setSampleMode] = useState(false)
@@ -185,7 +185,8 @@ export default function StatementProcessingWorkspace() {
     return () => document.removeEventListener('keydown', closeOnEscape)
   }, [reviewOpen])
 
-  function selectFiles(selected: File[]) {
+  async function selectFiles(selected: File[]) {
+    if (!selected.length) return
     const pdfs = selected.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
     if (pdfs.length !== selected.length) {
       setError('Only PDF statements can be added to this workflow.')
@@ -197,15 +198,27 @@ export default function StatementProcessingWorkspace() {
       if (inputRef.current) inputRef.current.value = ''
       return
     }
-    const existing = selectedFiles
-    const merged = [...existing]
-    for (const file of pdfs) {
-      const isDuplicate = merged.some((existingFile) => (
-        existingFile.name === file.name
-        && existingFile.size === file.size
-        && existingFile.lastModified === file.lastModified
-      ))
-      if (!isDuplicate) merged.push(file)
+    let incoming: Array<{ file: File, hash: string }>
+    try {
+      incoming = await Promise.all(pdfs.map(async (file) => ({
+        file,
+        hash: await statementFileHash(file),
+      })))
+    } catch {
+      setError('FinSim could not read one of the selected PDFs. Try choosing the file again.')
+      if (inputRef.current) inputRef.current.value = ''
+      return
+    }
+    const merged = [...selectedFiles]
+    const mergedHashes = [...selectedFileHashes]
+    for (const { file, hash } of incoming) {
+      if (mergedHashes.includes(hash)) {
+        setError(`${file.name} appears to be the same statement already selected, even if the file name is different.`)
+        if (inputRef.current) inputRef.current.value = ''
+        return
+      }
+      merged.push(file)
+      mergedHashes.push(hash)
     }
     if (merged.length > 12) {
       setError('Add no more than 12 monthly statements in one processing run.')
@@ -215,6 +228,7 @@ export default function StatementProcessingWorkspace() {
     if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
     setFiles(toStatementFiles(merged))
     setSelectedFiles(merged)
+    setSelectedFileHashes(mergedHashes)
     setSampleMode(false)
     setJobId(null)
     setError('')
@@ -244,7 +258,7 @@ export default function StatementProcessingWorkspace() {
     if (sampleMode) return
     try {
       if (jobId) await deleteProcessingJob(jobId)
-      const job = await createProcessingJob(selectedFiles)
+      const job = await createProcessingJob(selectedFiles, uploadMode)
       setJobId(job.job_id)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The statements could not be uploaded.')
@@ -298,6 +312,7 @@ export default function StatementProcessingWorkspace() {
     if (inputRef.current) inputRef.current.value = ''
     setFiles([])
     setSelectedFiles([])
+    setSelectedFileHashes([])
     setSampleMode(false)
     setJobId(null)
     setReviewItems(sampleReviewItems)
@@ -311,6 +326,7 @@ export default function StatementProcessingWorkspace() {
     if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
     setFiles(sampleStatements)
     setSelectedFiles([])
+    setSelectedFileHashes([])
     setUploadMode('multiple')
     setSampleMode(true)
     setJobId(null)
@@ -345,7 +361,7 @@ export default function StatementProcessingWorkspace() {
           type="file"
           accept="application/pdf,.pdf"
           multiple
-          onChange={(event) => selectFiles(Array.from(event.target.files || []))}
+          onChange={(event) => void selectFiles(Array.from(event.target.files || []))}
         />
 
         {files.length === 0 ? <div className="statement-dropzone">
@@ -411,7 +427,7 @@ export default function StatementProcessingWorkspace() {
           <button type="button" onClick={() => chooseUploadMode('multiple')}><Sparkles /><strong>Multiple accounts</strong><span>Best for checking, savings and transfers between your own accounts.</span></button>
           <button type="button" onClick={() => chooseUploadMode('credit')}><FileCheck2 /><strong>Credit card statements</strong><span>FinSim matches card payments back to bank account withdrawals when possible.</span></button>
         </div>
-        <small>Tip: Upload all statements that overlap the same month in one run when you want payment and transfer matching.</small>
+        <small>Tip: Upload all statements that overlap the same month in one run when you want payment and transfer matching. Credit card uploads are verified after FinSim reads the PDFs.</small>
       </section>
     </div>}
 
@@ -441,4 +457,15 @@ export default function StatementProcessingWorkspace() {
       </section>
     </div>}
   </>
+}
+
+async function statementFileHash(file: File) {
+  if (!globalThis.crypto?.subtle) {
+    return `${file.name}:${file.size}:${file.lastModified}`
+  }
+  const buffer = await file.arrayBuffer()
+  const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', buffer)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
 }

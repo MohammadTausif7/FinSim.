@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import BinaryIO, Callable, Literal, Mapping, Sequence
+from typing import BinaryIO, Callable, Literal, Mapping, Sequence, cast
 from uuid import uuid4
 
 from finsim_analytics import build_report
@@ -33,6 +33,7 @@ MAXIMUM_FILE_BYTES = 25 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
 JobStatus = Literal["processing", "review", "complete", "error"]
+UploadMode = Literal["single", "multiple", "credit"]
 
 
 class JobNotFoundError(LookupError):
@@ -56,6 +57,7 @@ class JobRecord:
     filenames: list[str]
     workspace: Path
     statement_paths: list[Path]
+    upload_mode: UploadMode = "multiple"
     status: JobStatus = "processing"
     stage: str = "validate"
     progress: int = 14
@@ -93,11 +95,13 @@ class ProcessingService:
         *,
         user_id: str | None = None,
         merchant_rules: Mapping[str, str] | None = None,
+        upload_mode: str = "multiple",
     ) -> JobRecord:
         if not MINIMUM_STATEMENTS <= len(uploads) <= MAXIMUM_STATEMENTS:
             raise ValueError(
                 f"Upload between {MINIMUM_STATEMENTS} and {MAXIMUM_STATEMENTS} statements"
             )
+        normalized_upload_mode = self._clean_upload_mode(upload_mode)
 
         job_id = uuid4().hex
         workspace = Path(tempfile.mkdtemp(prefix=f"finsim-{job_id[:8]}-"))
@@ -132,6 +136,7 @@ class ProcessingService:
             filenames,
             workspace,
             statement_paths,
+            upload_mode=normalized_upload_mode,
             user_id=user_id,
             merchant_rules=dict(merchant_rules or {}),
         )
@@ -145,6 +150,7 @@ class ProcessingService:
             self._set_progress(job, "extract", 42)
             parse_results = [self._parse_statement(path) for path in job.statement_paths]
             job.parse_summaries = [result.summary() for result in parse_results]
+            self._validate_parsed_statements(job, parse_results)
 
             self._set_progress(job, "periods", 58)
             self._validate_months(parse_results)
@@ -318,6 +324,85 @@ class ProcessingService:
                 digest.update(chunk)
                 output.write(chunk)
         return digest.hexdigest(), size, signature
+
+    @staticmethod
+    def _clean_upload_mode(upload_mode: str) -> UploadMode:
+        cleaned = (upload_mode or "multiple").strip().lower()
+        if cleaned in {"single", "multiple", "credit"}:
+            return cast(UploadMode, cleaned)
+        raise ValueError("Choose single account, multiple accounts, or credit card statements")
+
+    @classmethod
+    def _validate_parsed_statements(
+        cls,
+        job: JobRecord,
+        results: Sequence[ParseResult],
+    ) -> None:
+        cls._validate_statement_types(job, results)
+        cls._validate_statement_content(job, results)
+
+    @staticmethod
+    def _validate_statement_types(job: JobRecord, results: Sequence[ParseResult]) -> None:
+        account_types = {result.metadata.account_type for result in results}
+        institutions = {result.metadata.institution for result in results}
+
+        if job.upload_mode == "credit":
+            for filename, result in zip(job.filenames, results):
+                if result.metadata.account_type != "credit_card":
+                    account_type = result.metadata.account_type.replace("_", " ")
+                    raise ValueError(
+                        f"{filename} appears to be a {account_type} statement. "
+                        "Choose the credit card option only for credit card statements."
+                    )
+            return
+
+        if job.upload_mode == "single" and (len(account_types) > 1 or len(institutions) > 1):
+            raise ValueError(
+                "Single account uploads cannot mix banks or account types. "
+                "Choose multiple accounts when uploading checking, savings, or credit card statements together."
+            )
+
+    @classmethod
+    def _validate_statement_content(
+        cls,
+        job: JobRecord,
+        results: Sequence[ParseResult],
+    ) -> None:
+        seen_fingerprints: dict[tuple[object, ...], str] = {}
+        for filename, result in zip(job.filenames, results):
+            if not result.transactions:
+                raise ValueError(f"{filename} did not contain any transactions to process")
+            fingerprint = cls._statement_fingerprint(result)
+            if fingerprint in seen_fingerprints:
+                original = seen_fingerprints[fingerprint]
+                raise ValueError(
+                    f"{filename} appears to be the same statement as {original}, "
+                    "even though the file names differ."
+                )
+            seen_fingerprints[fingerprint] = filename
+
+    @staticmethod
+    def _statement_fingerprint(result: ParseResult) -> tuple[object, ...]:
+        metadata = result.metadata
+        transaction_rows = tuple(
+            (
+                transaction.transaction_id,
+                transaction.posted_at.isoformat(),
+                normalize_description(transaction.description_raw),
+                format(transaction.amount, ".2f"),
+                transaction.transaction_type,
+            )
+            for transaction in result.transactions
+        )
+        return (
+            metadata.institution,
+            metadata.account_type,
+            metadata.period_start.isoformat() if metadata.period_start else "",
+            metadata.period_end.isoformat() if metadata.period_end else "",
+            "" if metadata.beginning_balance is None else format(metadata.beginning_balance, ".2f"),
+            "" if metadata.ending_balance is None else format(metadata.ending_balance, ".2f"),
+            transaction_rows,
+        )
 
     @staticmethod
     def _validate_months(results: Sequence[ParseResult]) -> None:

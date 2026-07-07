@@ -341,6 +341,14 @@ export default function StatementProcessingWorkspace() {
       : jobState === 'processing'
         ? processingStages[stageIndex].progress
         : 0
+  const transactionReadingDone = jobState === 'review'
+    || jobState === 'finalizing'
+    || jobState === 'complete'
+    || (jobState === 'processing' && stageIndex > 1)
+  const transactionReadingActive = jobState === 'processing' && !transactionReadingDone
+  const accountMatchingDone = jobState === 'review' || jobState === 'finalizing' || jobState === 'complete'
+  const accountMatchingActive = jobState === 'processing' && stageIndex > 1
+  const merchantReviewDone = jobState === 'finalizing' || jobState === 'complete'
 
   return <>
     <div className="page-header statement-page-header">
@@ -408,9 +416,9 @@ export default function StatementProcessingWorkspace() {
       <div className="panel-head"><div><span className="overline">WHAT HAPPENS NEXT</span><h2>Your report is built in four clear checks</h2></div><span className="integration-badge">{files.length >= minimumStatementCount ? 'Ready to process' : `${minimumStatementCount - files.length} more needed`}</span></div>
       <div className="job-stages guidance-stages">
         <div className={files.length >= minimumStatementCount ? 'job-stage done' : 'job-stage'}><span>{files.length >= minimumStatementCount ? <Check /> : '1'}</span><div><strong>Statement coverage</strong><small>Use at least three months. Consecutive months are preferred for stronger forecast context.</small></div></div>
-        <div className={jobState === 'processing' || jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? 'job-stage active' : 'job-stage'}><span>{jobState === 'processing' ? <LoaderCircle className="spin" /> : '2'}</span><div><strong>Transaction reading</strong><small>FinSim extracts dates, descriptions, amounts and balances from each PDF.</small></div></div>
-        <div className={jobState === 'processing' || jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? 'job-stage active' : 'job-stage'}><span>{jobState === 'processing' ? '3' : jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' ? <Check /> : '3'}</span><div><strong>Account matching</strong><small>Same-month payments and transfers across accounts are matched so they do not inflate spending.</small></div></div>
-        <div className={jobState === 'review' ? 'job-stage active' : jobState === 'finalizing' || jobState === 'complete' ? 'job-stage done' : 'job-stage'}><span>{jobState === 'review' ? <RefreshCw /> : jobState === 'finalizing' || jobState === 'complete' ? <Check /> : '4'}</span><div><strong>Merchant review</strong><small>Only unclear merchants ask for your input, and repeated merchants are grouped.</small></div></div>
+        <div className={transactionReadingDone ? 'job-stage done' : transactionReadingActive ? 'job-stage active' : 'job-stage'}><span>{transactionReadingDone ? <Check /> : transactionReadingActive ? <LoaderCircle className="spin" /> : '2'}</span><div><strong>Transaction reading</strong><small>FinSim extracts dates, descriptions, amounts and balances from each PDF.</small></div></div>
+        <div className={accountMatchingDone ? 'job-stage done' : accountMatchingActive ? 'job-stage active' : 'job-stage'}><span>{accountMatchingDone ? <Check /> : accountMatchingActive ? <LoaderCircle className="spin" /> : '3'}</span><div><strong>Account matching</strong><small>Same-month payments and transfers across accounts are matched so they do not inflate spending.</small></div></div>
+        <div className={merchantReviewDone ? 'job-stage done' : jobState === 'review' ? 'job-stage active' : 'job-stage'}><span>{merchantReviewDone ? <Check /> : jobState === 'review' ? <RefreshCw /> : '4'}</span><div><strong>Merchant review</strong><small>Only unclear merchants ask for your input, and repeated merchants are grouped.</small></div></div>
       </div>
       <p className="statement-privacy-copy"><ShieldCheck size={15}/> FinSim does not ask for bank credentials. Uploaded statements are used only to create your report.</p>
     </section>

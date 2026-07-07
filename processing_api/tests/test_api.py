@@ -325,13 +325,8 @@ class ProcessingApiTests(unittest.TestCase):
             files=sample_files(),
             headers=self.headers,
         )
-        self.assertEqual(created.status_code, 202)
-        job = self.client.get(
-            f"/api/processing-jobs/{created.json()['job_id']}",
-            headers=self.headers,
-        ).json()
-        self.assertEqual(job["status"], "error")
-        self.assertIn("credit card option", job["error"])
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("credit card option", created.json()["detail"])
 
     def test_upload_mode_accepts_credit_card_statements(self) -> None:
         created = self.client.post(
@@ -357,13 +352,8 @@ class ProcessingApiTests(unittest.TestCase):
             ],
             headers=self.headers,
         )
-        self.assertEqual(created.status_code, 202)
-        job = self.client.get(
-            f"/api/processing-jobs/{created.json()['job_id']}",
-            headers=self.headers,
-        ).json()
-        self.assertEqual(job["status"], "error")
-        self.assertIn("Single account uploads cannot mix", job["error"])
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("Single account uploads cannot mix", created.json()["detail"])
 
     def test_same_statement_content_is_rejected_even_when_pdf_bytes_differ(self) -> None:
         created = self.client.post(
@@ -384,13 +374,8 @@ class ProcessingApiTests(unittest.TestCase):
             ],
             headers=self.headers,
         )
-        self.assertEqual(created.status_code, 202)
-        job = self.client.get(
-            f"/api/processing-jobs/{created.json()['job_id']}",
-            headers=self.headers,
-        ).json()
-        self.assertEqual(job["status"], "error")
-        self.assertIn("same statement", job["error"])
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("same statement", created.json()["detail"])
 
     def test_multiple_accounts_can_cover_the_same_three_months(self) -> None:
         created = self.client.post(

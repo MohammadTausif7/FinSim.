@@ -210,7 +210,13 @@ def create_app(
                 merchant_rules=processing.saved_merchant_rules(user.user_id),
                 upload_mode=upload_mode,
             )
-        except ValueError as error:
+            processing.validate_job_uploads(job.job_id)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
+            if "job" in locals():
+                try:
+                    processing.delete_job(job.job_id)
+                except JobNotFoundError:
+                    pass
             raise HTTPException(status_code=400, detail=str(error)) from error
         background_tasks.add_task(processing.process_job, job.job_id)
         return processing.job_view(job)

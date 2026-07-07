@@ -189,6 +189,14 @@ class ProcessingService:
         finally:
             self._remove_workspace(job)
 
+    def validate_job_uploads(self, job_id: str) -> None:
+        """Parse the uploaded files once before accepting a job into the queue."""
+
+        job = self.get_job(job_id)
+        parse_results = [self._parse_statement(path) for path in job.statement_paths]
+        self._validate_parsed_statements(job, parse_results)
+        self._validate_months(parse_results)
+
     def apply_job_feedback(self, job_id: str, payload: object) -> JobRecord:
         job = self.get_job(job_id)
         if job.status != "review" or job.report is None:

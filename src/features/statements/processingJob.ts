@@ -5,6 +5,8 @@ export type StatementFile = {
   name: string
   size: number
   periodLabel: string
+  uploadMode: 'single' | 'multiple' | 'credit'
+  detectedAccountType?: string
 }
 
 export type ReviewItem = {
@@ -37,9 +39,9 @@ export const processingStages = [
 ] as const
 
 export const sampleStatements: StatementFile[] = [
-  { id: 'sample-apr', name: 'checking_april_2026.pdf', size: 842_000, periodLabel: 'April 2026' },
-  { id: 'sample-may', name: 'checking_may_2026.pdf', size: 916_000, periodLabel: 'May 2026' },
-  { id: 'sample-jun', name: 'checking_june_2026.pdf', size: 884_000, periodLabel: 'June 2026' },
+  { id: 'sample-apr', name: 'checking_april_2026.pdf', size: 842_000, periodLabel: 'April 2026', uploadMode: 'multiple', detectedAccountType: 'checking' },
+  { id: 'sample-may', name: 'checking_may_2026.pdf', size: 916_000, periodLabel: 'May 2026', uploadMode: 'multiple', detectedAccountType: 'checking' },
+  { id: 'sample-jun', name: 'checking_june_2026.pdf', size: 884_000, periodLabel: 'June 2026', uploadMode: 'multiple', detectedAccountType: 'checking' },
 ]
 
 export const sampleReviewItems: ReviewItem[] = [

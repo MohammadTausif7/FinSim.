@@ -326,7 +326,7 @@ class ProcessingApiTests(unittest.TestCase):
             headers=self.headers,
         )
         self.assertEqual(created.status_code, 400)
-        self.assertIn("credit card option", created.json()["detail"])
+        self.assertIn("was added as a credit card statement", created.json()["detail"])
 
     def test_upload_mode_accepts_credit_card_statements(self) -> None:
         created = self.client.post(
@@ -341,6 +341,47 @@ class ProcessingApiTests(unittest.TestCase):
             headers=self.headers,
         ).json()
         self.assertEqual(job["status"], "review")
+
+    def test_credit_card_intent_is_checked_per_uploaded_file(self) -> None:
+        rejected = self.client.post(
+            "/api/processing-jobs",
+            data={
+                "upload_mode": "multiple",
+                "upload_intents": '["credit", "single", "single"]',
+            },
+            files=sample_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("was added as a credit card statement", rejected.json()["detail"])
+
+        accepted = self.client.post(
+            "/api/processing-jobs",
+            data={
+                "upload_mode": "multiple",
+                "upload_intents": '["credit", "single", "single"]',
+            },
+            files=[
+                credit_card_files((1,))[0],
+                *sample_files((2, 3)),
+            ],
+            headers=self.headers,
+        )
+        self.assertEqual(accepted.status_code, 202)
+        self.assertEqual(accepted.json()["statement_types"][0]["account_type"], "credit_card")
+
+    def test_upload_intents_must_match_file_count(self) -> None:
+        response = self.client.post(
+            "/api/processing-jobs",
+            data={
+                "upload_mode": "multiple",
+                "upload_intents": '["credit", "single"]',
+            },
+            files=sample_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Every uploaded statement", response.json()["detail"])
 
     def test_single_account_mode_rejects_mixed_account_types(self) -> None:
         created = self.client.post(

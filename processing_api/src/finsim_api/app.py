@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
 import os
 from typing import Annotated
 
@@ -196,6 +197,7 @@ def create_app(
         background_tasks: BackgroundTasks,
         files: Annotated[list[UploadFile], File(description="Three to twelve PDF statements")],
         upload_mode: Annotated[str, Form()] = "multiple",
+        upload_intents: Annotated[str | None, Form()] = None,
         authorization: Annotated[str | None, Header()] = None,
     ) -> dict[str, object]:
         user = _require_user(accounts, authorization)
@@ -204,11 +206,13 @@ def create_app(
             for file in files
         ]
         try:
+            parsed_upload_intents = _parse_upload_intents(upload_intents)
             job = processing.create_job(
                 uploads,
                 user_id=user.user_id,
                 merchant_rules=processing.saved_merchant_rules(user.user_id),
                 upload_mode=upload_mode,
+                upload_intents=parsed_upload_intents,
             )
             processing.validate_job_uploads(job.job_id)
         except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
@@ -287,6 +291,18 @@ def _require_user(accounts: AccountService, authorization: str | None):
         return accounts.get_user_for_session(bearer_token(authorization))
     except AuthError as error:
         raise HTTPException(status_code=401, detail=str(error)) from error
+
+
+def _parse_upload_intents(raw_value: str | None) -> list[str] | None:
+    if raw_value is None or not raw_value.strip():
+        return None
+    try:
+        value = json.loads(raw_value)
+    except json.JSONDecodeError as error:
+        raise ValueError("Upload type information could not be read") from error
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("Upload type information must be a list")
+    return value
 
 
 def _get_owned_job(

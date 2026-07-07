@@ -58,6 +58,7 @@ class JobRecord:
     workspace: Path
     statement_paths: list[Path]
     upload_mode: UploadMode = "multiple"
+    upload_intents: list[UploadMode] = field(default_factory=list)
     status: JobStatus = "processing"
     stage: str = "validate"
     progress: int = 14
@@ -96,12 +97,14 @@ class ProcessingService:
         user_id: str | None = None,
         merchant_rules: Mapping[str, str] | None = None,
         upload_mode: str = "multiple",
+        upload_intents: Sequence[str] | None = None,
     ) -> JobRecord:
         if not MINIMUM_STATEMENTS <= len(uploads) <= MAXIMUM_STATEMENTS:
             raise ValueError(
                 f"Upload between {MINIMUM_STATEMENTS} and {MAXIMUM_STATEMENTS} statements"
             )
         normalized_upload_mode = self._clean_upload_mode(upload_mode)
+        normalized_upload_intents = self._clean_upload_intents(upload_intents, len(uploads), normalized_upload_mode)
 
         job_id = uuid4().hex
         workspace = Path(tempfile.mkdtemp(prefix=f"finsim-{job_id[:8]}-"))
@@ -137,6 +140,7 @@ class ProcessingService:
             workspace,
             statement_paths,
             upload_mode=normalized_upload_mode,
+            upload_intents=normalized_upload_intents,
             user_id=user_id,
             merchant_rules=dict(merchant_rules or {}),
         )
@@ -194,6 +198,7 @@ class ProcessingService:
 
         job = self.get_job(job_id)
         parse_results = [self._parse_statement(path) for path in job.statement_paths]
+        job.parse_summaries = [result.summary() for result in parse_results]
         self._validate_parsed_statements(job, parse_results)
         self._validate_months(parse_results)
 
@@ -250,6 +255,7 @@ class ProcessingService:
             "filenames": job.filenames,
             "review_count": len(self._category_review_groups(job)),
             "transaction_count": len(job.transactions),
+            "statement_types": self._statement_type_view(job),
             "error": job.error,
         }
 
@@ -341,6 +347,19 @@ class ProcessingService:
         raise ValueError("Choose single account, multiple accounts, or credit card statements")
 
     @classmethod
+    def _clean_upload_intents(
+        cls,
+        upload_intents: Sequence[str] | None,
+        file_count: int,
+        fallback: UploadMode,
+    ) -> list[UploadMode]:
+        if upload_intents is None:
+            return [fallback for _ in range(file_count)]
+        if len(upload_intents) != file_count:
+            raise ValueError("Every uploaded statement must include one upload type")
+        return [cls._clean_upload_mode(intent) for intent in upload_intents]
+
+    @classmethod
     def _validate_parsed_statements(
         cls,
         job: JobRecord,
@@ -353,6 +372,14 @@ class ProcessingService:
     def _validate_statement_types(job: JobRecord, results: Sequence[ParseResult]) -> None:
         account_types = {result.metadata.account_type for result in results}
         institutions = {result.metadata.institution for result in results}
+
+        for filename, intent, result in zip(job.filenames, job.upload_intents, results):
+            if intent == "credit" and result.metadata.account_type != "credit_card":
+                account_type = result.metadata.account_type.replace("_", " ")
+                raise ValueError(
+                    f"{filename} was added as a credit card statement, but FinSim detected a "
+                    f"{account_type} statement. Remove it or add it again under the correct upload type."
+                )
 
         if job.upload_mode == "credit":
             for filename, result in zip(job.filenames, results):
@@ -369,6 +396,22 @@ class ProcessingService:
                 "Single account uploads cannot mix banks or account types. "
                 "Choose multiple accounts when uploading checking, savings, or credit card statements together."
             )
+
+    @staticmethod
+    def _statement_type_view(job: JobRecord) -> list[dict[str, str]]:
+        views: list[dict[str, str]] = []
+        for index, summary in enumerate(job.parse_summaries):
+            metadata = summary.get("metadata") if isinstance(summary, dict) else None
+            if not isinstance(metadata, dict):
+                continue
+            views.append(
+                {
+                    "filename": job.filenames[index] if index < len(job.filenames) else "",
+                    "institution": str(metadata.get("institution") or "unknown"),
+                    "account_type": str(metadata.get("account_type") or "unknown"),
+                }
+            )
+        return views
 
     @classmethod
     def _validate_statement_content(

@@ -6,6 +6,11 @@ export type ProcessingJob = {
   stage: string
   progress: number
   filenames: string[]
+  statement_types: Array<{
+    filename: string
+    institution: string
+    account_type: string
+  }>
   review_count: number
   transaction_count: number
   error: string | null
@@ -104,9 +109,14 @@ export type ProcessingResult = {
 
 const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 
-export async function createProcessingJob(files: File[], uploadMode: UploadMode = 'multiple') {
+export async function createProcessingJob(
+  files: File[],
+  uploadMode: UploadMode = 'multiple',
+  uploadIntents: UploadMode[] = files.map(() => uploadMode),
+) {
   const body = new FormData()
   body.append('upload_mode', uploadMode)
+  body.append('upload_intents', JSON.stringify(uploadIntents))
   files.forEach((file) => body.append('files', file))
   return request<ProcessingJob>('/api/processing-jobs', {
     method: 'POST',

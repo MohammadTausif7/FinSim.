@@ -38,13 +38,26 @@ import {
 import { refreshSavedAccountAnalytics, saveProcessingResult } from '../analytics/analyticsSnapshot'
 import { getSessionToken } from '../account/accountApi'
 
-function toStatementFiles(files: File[]) {
+function toStatementFiles(files: File[], uploadModes: UploadMode[], detectedTypes: string[] = []) {
   return files.map((file, index): StatementFile => ({
     id: `${file.name}-${file.lastModified}-${index}`,
     name: file.name,
     size: file.size,
     periodLabel: `Statement ${index + 1}`,
+    uploadMode: uploadModes[index] || 'multiple',
+    detectedAccountType: detectedTypes[index],
   }))
+}
+
+function uploadModeLabel(mode: UploadMode) {
+  if (mode === 'credit') return 'Added as credit card'
+  if (mode === 'single') return 'Added as single bank'
+  return 'Added as multiple accounts'
+}
+
+function detectedAccountLabel(accountType?: string) {
+  if (!accountType) return ''
+  return accountType.replace(/_/g, ' ')
 }
 
 function toReviewItem(item: ApiReviewItem): ReviewItem {
@@ -72,6 +85,8 @@ export default function StatementProcessingWorkspace() {
   const [files, setFiles] = useState<StatementFile[]>([])
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [selectedFileHashes, setSelectedFileHashes] = useState<string[]>([])
+  const [selectedFileIntents, setSelectedFileIntents] = useState<UploadMode[]>([])
+  const [selectedFileDetectedTypes, setSelectedFileDetectedTypes] = useState<string[]>([])
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [uploadMode, setUploadMode] = useState<UploadMode>('multiple')
   const [sampleMode, setSampleMode] = useState(false)
@@ -211,6 +226,8 @@ export default function StatementProcessingWorkspace() {
     }
     const merged = [...selectedFiles]
     const mergedHashes = [...selectedFileHashes]
+    const mergedIntents = [...selectedFileIntents]
+    const mergedDetectedTypes = [...selectedFileDetectedTypes]
     for (const { file, hash } of incoming) {
       if (mergedHashes.includes(hash)) {
         setError(`${file.name} appears to be the same statement already selected, even if the file name is different.`)
@@ -219,6 +236,8 @@ export default function StatementProcessingWorkspace() {
       }
       merged.push(file)
       mergedHashes.push(hash)
+      mergedIntents.push(uploadMode)
+      mergedDetectedTypes.push('')
     }
     if (merged.length > 12) {
       setError('Add no more than 12 monthly statements in one processing run.')
@@ -226,9 +245,11 @@ export default function StatementProcessingWorkspace() {
       return
     }
     if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
-    setFiles(toStatementFiles(merged))
+    setFiles(toStatementFiles(merged, mergedIntents, mergedDetectedTypes))
     setSelectedFiles(merged)
     setSelectedFileHashes(mergedHashes)
+    setSelectedFileIntents(mergedIntents)
+    setSelectedFileDetectedTypes(mergedDetectedTypes)
     setSampleMode(false)
     setJobId(null)
     setError('')
@@ -240,6 +261,23 @@ export default function StatementProcessingWorkspace() {
     setUploadMode(mode)
     setUploadDialogOpen(false)
     window.setTimeout(() => inputRef.current?.click(), 0)
+  }
+
+  function removeSelectedFile(index: number) {
+    if (jobState !== 'idle') return
+    if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
+    const nextFiles = selectedFiles.filter((_, fileIndex) => fileIndex !== index)
+    const nextHashes = selectedFileHashes.filter((_, fileIndex) => fileIndex !== index)
+    const nextIntents = selectedFileIntents.filter((_, fileIndex) => fileIndex !== index)
+    const nextDetectedTypes = selectedFileDetectedTypes.filter((_, fileIndex) => fileIndex !== index)
+    setSelectedFiles(nextFiles)
+    setSelectedFileHashes(nextHashes)
+    setSelectedFileIntents(nextIntents)
+    setSelectedFileDetectedTypes(nextDetectedTypes)
+    setFiles(toStatementFiles(nextFiles, nextIntents, nextDetectedTypes))
+    setJobId(null)
+    setSampleMode(false)
+    setError('')
   }
 
   async function startProcessing() {
@@ -258,7 +296,13 @@ export default function StatementProcessingWorkspace() {
     if (sampleMode) return
     try {
       if (jobId) await deleteProcessingJob(jobId)
-      const job = await createProcessingJob(selectedFiles, uploadMode)
+      const jobUploadMode = selectedFileIntents.every((intent) => intent === selectedFileIntents[0])
+        ? selectedFileIntents[0] || uploadMode
+        : 'multiple'
+      const job = await createProcessingJob(selectedFiles, jobUploadMode, selectedFileIntents)
+      const detectedTypes = job.statement_types.map((statement) => statement.account_type)
+      setSelectedFileDetectedTypes(detectedTypes)
+      setFiles(toStatementFiles(selectedFiles, selectedFileIntents, detectedTypes))
       setJobId(job.job_id)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The statements could not be uploaded.')
@@ -313,6 +357,8 @@ export default function StatementProcessingWorkspace() {
     setFiles([])
     setSelectedFiles([])
     setSelectedFileHashes([])
+    setSelectedFileIntents([])
+    setSelectedFileDetectedTypes([])
     setSampleMode(false)
     setJobId(null)
     setReviewItems(sampleReviewItems)
@@ -327,6 +373,8 @@ export default function StatementProcessingWorkspace() {
     setFiles(sampleStatements)
     setSelectedFiles([])
     setSelectedFileHashes([])
+    setSelectedFileIntents([])
+    setSelectedFileDetectedTypes([])
     setUploadMode('multiple')
     setSampleMode(true)
     setJobId(null)
@@ -349,6 +397,11 @@ export default function StatementProcessingWorkspace() {
   const accountMatchingDone = jobState === 'review' || jobState === 'finalizing' || jobState === 'complete'
   const accountMatchingActive = jobState === 'processing' && stageIndex > 1
   const merchantReviewDone = jobState === 'finalizing' || jobState === 'complete'
+  const selectedUploadSummary = selectedFileIntents.length
+    ? selectedFileIntents.every((intent) => intent === selectedFileIntents[0])
+      ? uploadModeLabel(selectedFileIntents[0])
+      : 'Mixed statement types'
+    : uploadModeLabel(uploadMode)
 
   return <>
     <div className="page-header statement-page-header">
@@ -381,11 +434,19 @@ export default function StatementProcessingWorkspace() {
             <button className="button button-secondary" onClick={useSafeSamples}>Use safe sample files</button>
           </div>
         </div> : <div className="selected-statements">
-          <div className="selected-summary"><strong>{files.length} statements selected</strong><span>{uploadMode === 'single' ? 'Single account' : uploadMode === 'credit' ? 'Credit card statements' : 'Multiple accounts'}</span><button onClick={() => setUploadDialogOpen(true)}>Add more PDFs</button></div>
+          <div className="selected-summary"><strong>{files.length} statements selected</strong><span>{selectedUploadSummary}</span><button onClick={() => setUploadDialogOpen(true)}>Add more PDFs</button></div>
           {files.map((file, index) => <div className="selected-file" key={file.id}>
             <span><FileCheck2 /></span>
-            <div><strong>{file.name}</strong><small>{file.periodLabel} · {formatFileSize(file.size)}</small></div>
+            <div>
+              <strong>{file.name}</strong>
+              <small>{file.periodLabel} · {formatFileSize(file.size)}</small>
+              <div className="statement-file-tags">
+                <b>{uploadModeLabel(file.uploadMode)}</b>
+                {file.detectedAccountType && <b>Detected {detectedAccountLabel(file.detectedAccountType)}</b>}
+              </div>
+            </div>
             <i>{index + 1}</i>
+            {jobState === 'idle' && <button className="remove-selected-file" type="button" onClick={() => removeSelectedFile(index)} aria-label={`Remove ${file.name}`}><X /></button>}
           </div>)}
           <button className="button button-primary process-button" disabled={jobState !== 'idle'} onClick={startProcessing}>
             {jobState === 'idle' && <>Process statements <ArrowRight /></>}

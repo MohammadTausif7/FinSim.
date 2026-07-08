@@ -26,6 +26,9 @@ class AnalyticsTests(unittest.TestCase):
         self.assertEqual(report.monthly_summaries[2].review_count, 1)
         self.assertEqual(report.forecast.target_month, "2026-04")
         self.assertEqual(report.forecast.confidence, "medium")
+        self.assertEqual(report.forecast.method, "exponential smoothing with damped trend")
+        self.assertLessEqual(report.forecast.low, report.forecast.expected_spending)
+        self.assertGreaterEqual(report.forecast.high, report.forecast.expected_spending)
         self.assertTrue(report.category_breakdown)
         self.assertTrue(report.spending_trends)
 

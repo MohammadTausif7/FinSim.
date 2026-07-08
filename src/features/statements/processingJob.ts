@@ -5,6 +5,8 @@ export type StatementFile = {
   name: string
   size: number
   periodLabel: string
+  uploadMode: 'single' | 'multiple' | 'credit'
+  detectedAccountType?: string
 }
 
 export type ReviewItem = {
@@ -28,17 +30,18 @@ export const maximumStatementBytes = 25 * 1024 * 1024
 // The interface listens to named job stages rather than inventing progress from
 // elapsed time. A backend can publish these same values without changing the UI.
 export const processingStages = [
-  { id: 'validate', label: 'Validating statements', detail: 'Checking file type, count and duplicates', progress: 14 },
-  { id: 'extract', label: 'Reading transactions', detail: 'Soumya parser and reconciliation', progress: 42 },
-  { id: 'periods', label: 'Checking monthly coverage', detail: 'Confirming distinct statement periods', progress: 58 },
-  { id: 'clean', label: 'Cleaning descriptions', detail: 'Normalizing merchants and removing duplicates', progress: 74 },
-  { id: 'categorize', label: 'Categorizing spending', detail: 'Applying Sahasra rules and confidence scores', progress: 90 },
+  { id: 'validate', label: 'Checking your files', detail: 'Making sure the selected statements are usable', progress: 14 },
+  { id: 'extract', label: 'Finding transactions', detail: 'Reading the purchases, deposits and transfers in each statement', progress: 42 },
+  { id: 'periods', label: 'Confirming the months', detail: 'Making sure the statements cover separate monthly periods', progress: 58 },
+  { id: 'clean', label: 'Cleaning merchant names', detail: 'Combining duplicate rows and making descriptions easier to read', progress: 74 },
+  { id: 'categorize', label: 'Grouping spending', detail: 'Placing transactions into clear financial categories', progress: 88 },
+  { id: 'match', label: 'Matching account movement', detail: 'Finding credit card payments and transfers across same-month statements', progress: 94 },
 ] as const
 
 export const sampleStatements: StatementFile[] = [
-  { id: 'sample-apr', name: 'checking_april_2026.pdf', size: 842_000, periodLabel: 'April 2026' },
-  { id: 'sample-may', name: 'checking_may_2026.pdf', size: 916_000, periodLabel: 'May 2026' },
-  { id: 'sample-jun', name: 'checking_june_2026.pdf', size: 884_000, periodLabel: 'June 2026' },
+  { id: 'sample-apr', name: 'checking_april_2026.pdf', size: 842_000, periodLabel: 'April 2026', uploadMode: 'multiple', detectedAccountType: 'checking' },
+  { id: 'sample-may', name: 'checking_may_2026.pdf', size: 916_000, periodLabel: 'May 2026', uploadMode: 'multiple', detectedAccountType: 'checking' },
+  { id: 'sample-jun', name: 'checking_june_2026.pdf', size: 884_000, periodLabel: 'June 2026', uploadMode: 'multiple', detectedAccountType: 'checking' },
 ]
 
 export const sampleReviewItems: ReviewItem[] = [

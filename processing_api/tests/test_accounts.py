@@ -31,7 +31,7 @@ class AccountApiTests(unittest.TestCase):
         signup = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "mohammad@example.com",
                 "password": "securepass123",
             },
@@ -51,9 +51,26 @@ class AccountApiTests(unittest.TestCase):
         self.assertEqual(verified.status_code, 200)
         self.assertTrue(verified.json()["user"]["email_verified"])
 
-        signin = self.client.post(
-            "/api/accounts/signin",
+        challenge = self.client.post(
+            "/api/accounts/signin/request-code",
             json={"email": "mohammad@example.com", "password": "securepass123"},
+        )
+        self.assertEqual(challenge.status_code, 200)
+        self.assertEqual(len(challenge.json()["verification_code"]), 6)
+
+        wrong_code = self.client.post(
+            "/api/accounts/signin/verify-code",
+            json={"login_challenge_id": challenge.json()["login_challenge_id"], "code": "000000"},
+        )
+        self.assertEqual(wrong_code.status_code, 401)
+
+        challenge = self.client.post(
+            "/api/accounts/signin/request-code",
+            json={"email": "mohammad@example.com", "password": "securepass123"},
+        ).json()
+        signin = self.client.post(
+            "/api/accounts/signin/verify-code",
+            json={"login_challenge_id": challenge["login_challenge_id"], "code": challenge["verification_code"]},
         )
         self.assertEqual(signin.status_code, 200)
         session = signin.json()["session_token"]
@@ -79,7 +96,7 @@ class AccountApiTests(unittest.TestCase):
         first = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "same@example.com",
                 "password": "securepass123",
             },
@@ -87,7 +104,7 @@ class AccountApiTests(unittest.TestCase):
         duplicate = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "same@example.com",
                 "password": "securepass123",
             },
@@ -100,15 +117,19 @@ class AccountApiTests(unittest.TestCase):
         signup = self.client.post(
             "/api/accounts/signup",
             json={
-                "full_name": "Mohammad",
+                "full_name": "Test User",
                 "email": "settings@example.com",
                 "password": "securepass123",
             },
         ).json()
         self.client.post("/api/accounts/verify-email", json={"token": signup["verification_token"]})
-        session = self.client.post(
-            "/api/accounts/signin",
+        challenge = self.client.post(
+            "/api/accounts/signin/request-code",
             json={"email": "settings@example.com", "password": "securepass123"},
+        ).json()
+        session = self.client.post(
+            "/api/accounts/signin/verify-code",
+            json={"login_challenge_id": challenge["login_challenge_id"], "code": challenge["verification_code"]},
         ).json()["session_token"]
 
         missing = self.client.patch("/api/accounts/settings", json={"theme": "dark"})
@@ -116,11 +137,11 @@ class AccountApiTests(unittest.TestCase):
 
         updated = self.client.patch(
             "/api/accounts/settings",
-            json={"full_name": "Mohammad T", "theme": "dark", "monthly_email": False},
+            json={"full_name": "Updated User", "theme": "dark", "monthly_email": False},
             headers={"Authorization": f"Bearer {session}"},
         )
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json()["user"]["full_name"], "Mohammad T")
+        self.assertEqual(updated.json()["user"]["full_name"], "Updated User")
         self.assertEqual(updated.json()["user"]["theme"], "dark")
         self.assertFalse(updated.json()["user"]["monthly_email"])
 

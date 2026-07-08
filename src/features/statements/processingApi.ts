@@ -1,4 +1,4 @@
-import { authHeaders } from '../account/accountApi'
+import { authHeaders, clearSession } from '../account/accountApi'
 
 export type ProcessingJob = {
   job_id: string
@@ -6,6 +6,11 @@ export type ProcessingJob = {
   stage: string
   progress: number
   filenames: string[]
+  statement_types: Array<{
+    filename: string
+    institution: string
+    account_type: string
+  }>
   review_count: number
   transaction_count: number
   error: string | null
@@ -38,6 +43,8 @@ export type FeedbackDecision = {
   category: string
   remember_merchant: boolean
 }
+
+export type UploadMode = 'single' | 'multiple' | 'credit'
 
 export type AnalyticsReport = {
   monthly_summaries: Array<{
@@ -91,6 +98,7 @@ export type ProcessingResult = {
   quality_report: {
     output_rows: number
     review_rows: number
+    internal_transfer_matches?: number
     warnings: string[]
   }
   analytics: AnalyticsReport
@@ -101,8 +109,14 @@ export type ProcessingResult = {
 
 const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 
-export async function createProcessingJob(files: File[]) {
+export async function createProcessingJob(
+  files: File[],
+  uploadMode: UploadMode = 'multiple',
+  uploadIntents: UploadMode[] = files.map(() => uploadMode),
+) {
   const body = new FormData()
+  body.append('upload_mode', uploadMode)
+  body.append('upload_intents', JSON.stringify(uploadIntents))
   files.forEach((file) => body.append('files', file))
   return request<ProcessingJob>('/api/processing-jobs', {
     method: 'POST',
@@ -156,6 +170,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
+    if (response.status === 401) {
+      clearSession()
+      throw new Error('Your session expired. Please sign in again before processing statements.')
+    }
     throw new Error(payload?.detail || `Processing service returned ${response.status}.`)
   }
   return response.json() as Promise<T>

@@ -12,7 +12,7 @@ from .csv_io import read_processed_transactions
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a FinSim analytics report from processed transactions.")
-    parser.add_argument("input_csv", type=Path, help="Processed transaction CSV from Sahasra's pipeline")
+    parser.add_argument("input_csv", type=Path, help="Processed transaction CSV from the categorization pipeline")
     parser.add_argument("--output", type=Path, help="Optional JSON output path")
     args = parser.parse_args(argv)
 

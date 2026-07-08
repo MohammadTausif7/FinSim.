@@ -5,11 +5,12 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 import tempfile
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from finsim_api.accounts import AccountService
-from finsim_api.app import create_app
+from finsim_api.app import _cors_origins, create_app
 from finsim_api.service import ProcessingService
 from finsim_api.storage import UserDataStore
 from finsim_parser.models import (
@@ -24,18 +25,28 @@ def fake_parser(path: Path) -> ParseResult:
     marker = path.read_bytes().decode("latin-1")
     month = next(month for month in range(1, 13) if f"MONTH={month}" in marker)
     account = next(value for value in range(1, 13) if f"ACCOUNT={value}" in marker)
+    account_type = "credit_card" if "TYPE=credit_card" in marker else "checking"
+    amount_match = next((value for value in ("100.00", "-100.00", "-20.00") if f"AMOUNT={value}" in marker), None)
+    amount = Decimal(amount_match or "-20.00")
+    description = (
+        "Mobile Banking payment to credit card"
+        if "DESC=CARDPAYMENT" in marker
+        else "Credit card payment received"
+        if "DESC=PAYMENTRECEIVED" in marker
+        else "LOCAL SAMPLE MERCHANT"
+    )
     transaction = Transaction(
         transaction_id=f"sample-{account}-{month}",
         posted_at=date(2026, month, 10),
-        description_raw="LOCAL SAMPLE MERCHANT",
-        amount=Decimal("-20.00"),
-        transaction_type="debit",
+        description_raw=description,
+        amount=amount,
+        transaction_type="credit" if amount > 0 else "debit",
         source_statement_id=f"statement-{account}-{month}",
         page_number=1,
     )
     metadata = StatementMetadata(
         institution="sample_bank",
-        account_type="checking",
+        account_type=account_type,
         period_start=date(2026, month, 1),
         period_end=date(2026, month, 28),
         source_statement_id=f"statement-{account}-{month}",
@@ -60,6 +71,76 @@ def sample_files(months: tuple[int, ...] = (1, 2, 3)):
         )
         for position, month in enumerate(months, start=1)
     ]
+
+
+def credit_card_files(months: tuple[int, ...] = (1, 2, 3)):
+    return [
+        (
+            "files",
+            (
+                f"card-{position}-{month}.pdf",
+                f"%PDF-1.7 MONTH={month} ACCOUNT={position} TYPE=credit_card".encode(),
+                "application/pdf",
+            ),
+        )
+        for position, month in enumerate(months, start=1)
+    ]
+
+
+def internal_transfer_files():
+    return [
+        (
+            "files",
+            (
+                "checking-jan.pdf",
+                b"%PDF-1.7 MONTH=1 ACCOUNT=1 AMOUNT=-100.00 DESC=CARDPAYMENT",
+                "application/pdf",
+            ),
+        ),
+        (
+            "files",
+            (
+                "card-jan.pdf",
+                b"%PDF-1.7 MONTH=1 ACCOUNT=2 AMOUNT=100.00 DESC=PAYMENTRECEIVED",
+                "application/pdf",
+            ),
+        ),
+        (
+            "files",
+            (
+                "checking-feb.pdf",
+                b"%PDF-1.7 MONTH=2 ACCOUNT=1",
+                "application/pdf",
+            ),
+        ),
+        (
+            "files",
+            (
+                "checking-mar.pdf",
+                b"%PDF-1.7 MONTH=3 ACCOUNT=1",
+                "application/pdf",
+            ),
+        ),
+    ]
+
+
+class ApiConfigurationTests(unittest.TestCase):
+    def test_cors_origins_can_be_configured_for_deployment(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"FINSIM_CORS_ORIGINS": "https://finsim.example.com, https://staging.example.com/"},
+        ):
+            self.assertEqual(
+                _cors_origins(),
+                ["https://finsim.example.com", "https://staging.example.com"],
+            )
+
+    def test_cors_origins_default_to_local_development(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(
+                _cors_origins(),
+                ["http://localhost:5173", "http://127.0.0.1:5173"],
+            )
 
 
 class ProcessingApiTests(unittest.TestCase):
@@ -237,6 +318,106 @@ class ProcessingApiTests(unittest.TestCase):
         self.assertEqual(duplicate.status_code, 400)
         self.assertIn("duplicates", duplicate.json()["detail"])
 
+    def test_upload_mode_rejects_bank_statements_in_credit_card_flow(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            data={"upload_mode": "credit"},
+            files=sample_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("was added as a credit card statement", created.json()["detail"])
+
+    def test_upload_mode_accepts_credit_card_statements(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            data={"upload_mode": "credit"},
+            files=credit_card_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 202)
+        job = self.client.get(
+            f"/api/processing-jobs/{created.json()['job_id']}",
+            headers=self.headers,
+        ).json()
+        self.assertEqual(job["status"], "review")
+
+    def test_credit_card_intent_is_checked_per_uploaded_file(self) -> None:
+        rejected = self.client.post(
+            "/api/processing-jobs",
+            data={
+                "upload_mode": "multiple",
+                "upload_intents": '["credit", "single", "single"]',
+            },
+            files=sample_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("was added as a credit card statement", rejected.json()["detail"])
+
+        accepted = self.client.post(
+            "/api/processing-jobs",
+            data={
+                "upload_mode": "multiple",
+                "upload_intents": '["credit", "single", "single"]',
+            },
+            files=[
+                credit_card_files((1,))[0],
+                *sample_files((2, 3)),
+            ],
+            headers=self.headers,
+        )
+        self.assertEqual(accepted.status_code, 202)
+        self.assertEqual(accepted.json()["statement_types"][0]["account_type"], "credit_card")
+
+    def test_upload_intents_must_match_file_count(self) -> None:
+        response = self.client.post(
+            "/api/processing-jobs",
+            data={
+                "upload_mode": "multiple",
+                "upload_intents": '["credit", "single"]',
+            },
+            files=sample_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Every uploaded statement", response.json()["detail"])
+
+    def test_single_account_mode_rejects_mixed_account_types(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            data={"upload_mode": "single"},
+            files=[
+                *sample_files((1, 2)),
+                credit_card_files((3,))[0],
+            ],
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("Single account uploads cannot mix", created.json()["detail"])
+
+    def test_same_statement_content_is_rejected_even_when_pdf_bytes_differ(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            files=[
+                (
+                    "files",
+                    ("statement-original.pdf", b"%PDF-1.7 MONTH=1 ACCOUNT=1 EXPORT=A", "application/pdf"),
+                ),
+                (
+                    "files",
+                    ("renamed-copy.pdf", b"%PDF-1.7 MONTH=1 ACCOUNT=1 EXPORT=B", "application/pdf"),
+                ),
+                (
+                    "files",
+                    ("statement-feb.pdf", b"%PDF-1.7 MONTH=2 ACCOUNT=1", "application/pdf"),
+                ),
+            ],
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("same statement", created.json()["detail"])
+
     def test_multiple_accounts_can_cover_the_same_three_months(self) -> None:
         created = self.client.post(
             "/api/processing-jobs",
@@ -251,7 +432,47 @@ class ProcessingApiTests(unittest.TestCase):
         self.assertEqual(job["status"], "review")
         self.assertEqual(job["transaction_count"], 6)
 
-    def test_month_gaps_and_non_pdf_content_are_rejected(self) -> None:
+    def test_same_month_cross_account_transfer_is_excluded_from_spending(self) -> None:
+        created = self.client.post(
+            "/api/processing-jobs",
+            files=internal_transfer_files(),
+            headers=self.headers,
+        )
+        self.assertEqual(created.status_code, 202)
+        job_id = created.json()["job_id"]
+        review = self.client.get(
+            f"/api/processing-jobs/{job_id}/review",
+            headers=self.headers,
+        ).json()
+        decisions = [
+            {
+                "transaction_ids": item["transaction_ids"],
+                "category": "Shopping",
+                "remember_merchant": False,
+            }
+            for item in review["items"]
+        ]
+        updated = self.client.post(
+            f"/api/processing-jobs/{job_id}/feedback",
+            json=decisions,
+            headers=self.headers,
+        )
+        self.assertEqual(updated.status_code, 200)
+        result = self.client.get(
+            f"/api/processing-jobs/{job_id}/result",
+            headers=self.headers,
+        ).json()
+        january = next(row for row in result["analytics"]["monthly_summaries"] if row["month"] == "2026-01")
+        self.assertEqual(january["income"], "0.00")
+        self.assertEqual(january["spending"], "0.00")
+        self.assertEqual(result["quality_report"]["internal_transfer_matches"], 1)
+        matched = [
+            row for row in result["transactions"]
+            if row["category_source"] == "internal_match"
+        ]
+        self.assertEqual(len(matched), 2)
+
+    def test_month_gaps_are_allowed_but_non_pdf_content_is_rejected(self) -> None:
         gap = self.client.post(
             "/api/processing-jobs",
             files=sample_files((1, 2, 4)),
@@ -262,8 +483,8 @@ class ProcessingApiTests(unittest.TestCase):
             f"/api/processing-jobs/{gap.json()['job_id']}",
             headers=self.headers,
         ).json()
-        self.assertEqual(gap_job["status"], "error")
-        self.assertIn("consecutive", gap_job["error"])
+        self.assertEqual(gap_job["status"], "review")
+        self.assertEqual(gap_job["transaction_count"], 3)
 
         invalid = self.client.post(
             "/api/processing-jobs",

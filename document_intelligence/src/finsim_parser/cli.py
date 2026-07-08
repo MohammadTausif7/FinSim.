@@ -14,6 +14,7 @@ from .pipeline import inspect_statement, parse_statement
 
 VERIFIED_LAYOUTS = [
     {"institution": "bank_of_america", "account_type": "credit_card", "method": "text"},
+    {"institution": "bank_of_america", "account_type": "checking", "method": "text"},
     {"institution": "discover", "account_type": "credit_card", "method": "text"},
     {"institution": "midfirst", "account_type": "checking", "method": "ocr"},
 ]

@@ -7,7 +7,6 @@ import {
   FileCheck2,
   FileText,
   LoaderCircle,
-  LockKeyhole,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -34,17 +33,31 @@ import {
   getReviewItems,
   submitFeedback,
   type ApiReviewItem,
+  type UploadMode,
 } from './processingApi'
 import { refreshSavedAccountAnalytics, saveProcessingResult } from '../analytics/analyticsSnapshot'
 import { getSessionToken } from '../account/accountApi'
 
-function toStatementFiles(files: File[]) {
+function toStatementFiles(files: File[], uploadModes: UploadMode[], detectedTypes: string[] = []) {
   return files.map((file, index): StatementFile => ({
     id: `${file.name}-${file.lastModified}-${index}`,
     name: file.name,
     size: file.size,
     periodLabel: `Statement ${index + 1}`,
+    uploadMode: uploadModes[index] || 'multiple',
+    detectedAccountType: detectedTypes[index],
   }))
+}
+
+function uploadModeLabel(mode: UploadMode) {
+  if (mode === 'credit') return 'Added as credit card'
+  if (mode === 'single') return 'Added as single bank'
+  return 'Added as multiple accounts'
+}
+
+function detectedAccountLabel(accountType?: string) {
+  if (!accountType) return ''
+  return accountType.replace(/_/g, ' ')
 }
 
 function toReviewItem(item: ApiReviewItem): ReviewItem {
@@ -71,6 +84,11 @@ export default function StatementProcessingWorkspace() {
   const jobIdRef = useRef<string | null>(null)
   const [files, setFiles] = useState<StatementFile[]>([])
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [selectedFileHashes, setSelectedFileHashes] = useState<string[]>([])
+  const [selectedFileIntents, setSelectedFileIntents] = useState<UploadMode[]>([])
+  const [selectedFileDetectedTypes, setSelectedFileDetectedTypes] = useState<string[]>([])
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [uploadMode, setUploadMode] = useState<UploadMode>('multiple')
   const [sampleMode, setSampleMode] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [jobState, setJobState] = useState<JobState>('idle')
@@ -81,7 +99,7 @@ export default function StatementProcessingWorkspace() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [rememberMerchant, setRememberMerchant] = useState(true)
   const [availableCategories, setAvailableCategories] = useState(allCategories)
-  const [completion, setCompletion] = useState({ cleaned: 0, confirmed: 0, warnings: 0 })
+  const [completion, setCompletion] = useState({ cleaned: 0, confirmed: 0, warnings: 0, internalTransfers: 0 })
 
   const unresolved = useMemo(
     () => reviewItems.filter((item) => !item.resolvedCategory),
@@ -147,6 +165,7 @@ export default function StatementProcessingWorkspace() {
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
             warnings: result.quality_report.warnings.length,
+            internalTransfers: result.quality_report.internal_transfer_matches || 0,
           })
           setJobState('finalizing')
           return
@@ -181,27 +200,84 @@ export default function StatementProcessingWorkspace() {
     return () => document.removeEventListener('keydown', closeOnEscape)
   }, [reviewOpen])
 
-  function selectFiles(selected: File[]) {
+  async function selectFiles(selected: File[]) {
+    if (!selected.length) return
     const pdfs = selected.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
     if (pdfs.length !== selected.length) {
       setError('Only PDF statements can be added to this workflow.')
+      if (inputRef.current) inputRef.current.value = ''
       return
     }
     if (pdfs.some((file) => file.size > maximumStatementBytes)) {
       setError('Each statement must be 25 MB or smaller.')
+      if (inputRef.current) inputRef.current.value = ''
       return
     }
-    if (pdfs.length > 12) {
-      setError('Add no more than 12 monthly statements at one time.')
+    let incoming: Array<{ file: File, hash: string }>
+    try {
+      incoming = await Promise.all(pdfs.map(async (file) => ({
+        file,
+        hash: await statementFileHash(file),
+      })))
+    } catch {
+      setError('FinSim could not read one of the selected PDFs. Try choosing the file again.')
+      if (inputRef.current) inputRef.current.value = ''
+      return
+    }
+    const merged = [...selectedFiles]
+    const mergedHashes = [...selectedFileHashes]
+    const mergedIntents = [...selectedFileIntents]
+    const mergedDetectedTypes = [...selectedFileDetectedTypes]
+    for (const { file, hash } of incoming) {
+      if (mergedHashes.includes(hash)) {
+        setError(`${file.name} appears to be the same statement already selected, even if the file name is different.`)
+        if (inputRef.current) inputRef.current.value = ''
+        return
+      }
+      merged.push(file)
+      mergedHashes.push(hash)
+      mergedIntents.push(uploadMode)
+      mergedDetectedTypes.push('')
+    }
+    if (merged.length > 12) {
+      setError('Add no more than 12 monthly statements in one processing run.')
+      if (inputRef.current) inputRef.current.value = ''
       return
     }
     if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
-    setFiles(toStatementFiles(pdfs))
-    setSelectedFiles(pdfs)
+    setFiles(toStatementFiles(merged, mergedIntents, mergedDetectedTypes))
+    setSelectedFiles(merged)
+    setSelectedFileHashes(mergedHashes)
+    setSelectedFileIntents(mergedIntents)
+    setSelectedFileDetectedTypes(mergedDetectedTypes)
     setSampleMode(false)
     setJobId(null)
     setError('')
     setJobState('idle')
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  function chooseUploadMode(mode: UploadMode) {
+    setUploadMode(mode)
+    setUploadDialogOpen(false)
+    window.setTimeout(() => inputRef.current?.click(), 0)
+  }
+
+  function removeSelectedFile(index: number) {
+    if (jobState !== 'idle') return
+    if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
+    const nextFiles = selectedFiles.filter((_, fileIndex) => fileIndex !== index)
+    const nextHashes = selectedFileHashes.filter((_, fileIndex) => fileIndex !== index)
+    const nextIntents = selectedFileIntents.filter((_, fileIndex) => fileIndex !== index)
+    const nextDetectedTypes = selectedFileDetectedTypes.filter((_, fileIndex) => fileIndex !== index)
+    setSelectedFiles(nextFiles)
+    setSelectedFileHashes(nextHashes)
+    setSelectedFileIntents(nextIntents)
+    setSelectedFileDetectedTypes(nextDetectedTypes)
+    setFiles(toStatementFiles(nextFiles, nextIntents, nextDetectedTypes))
+    setJobId(null)
+    setSampleMode(false)
+    setError('')
   }
 
   async function startProcessing() {
@@ -220,7 +296,13 @@ export default function StatementProcessingWorkspace() {
     if (sampleMode) return
     try {
       if (jobId) await deleteProcessingJob(jobId)
-      const job = await createProcessingJob(selectedFiles)
+      const jobUploadMode = selectedFileIntents.every((intent) => intent === selectedFileIntents[0])
+        ? selectedFileIntents[0] || uploadMode
+        : 'multiple'
+      const job = await createProcessingJob(selectedFiles, jobUploadMode, selectedFileIntents)
+      const detectedTypes = job.statement_types.map((statement) => statement.account_type)
+      setSelectedFileDetectedTypes(detectedTypes)
+      setFiles(toStatementFiles(selectedFiles, selectedFileIntents, detectedTypes))
       setJobId(job.job_id)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The statements could not be uploaded.')
@@ -247,6 +329,7 @@ export default function StatementProcessingWorkspace() {
             cleaned: result.quality_report.output_rows,
             confirmed: result.reviewed_merchant_count,
             warnings: result.quality_report.warnings.length,
+            internalTransfers: result.quality_report.internal_transfer_matches || 0,
           })
         }
       } catch (caught) {
@@ -273,6 +356,9 @@ export default function StatementProcessingWorkspace() {
     if (inputRef.current) inputRef.current.value = ''
     setFiles([])
     setSelectedFiles([])
+    setSelectedFileHashes([])
+    setSelectedFileIntents([])
+    setSelectedFileDetectedTypes([])
     setSampleMode(false)
     setJobId(null)
     setReviewItems(sampleReviewItems)
@@ -286,6 +372,10 @@ export default function StatementProcessingWorkspace() {
     if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
     setFiles(sampleStatements)
     setSelectedFiles([])
+    setSelectedFileHashes([])
+    setSelectedFileIntents([])
+    setSelectedFileDetectedTypes([])
+    setUploadMode('multiple')
     setSampleMode(true)
     setJobId(null)
     setError('')
@@ -299,6 +389,19 @@ export default function StatementProcessingWorkspace() {
       : jobState === 'processing'
         ? processingStages[stageIndex].progress
         : 0
+  const transactionReadingDone = jobState === 'review'
+    || jobState === 'finalizing'
+    || jobState === 'complete'
+    || (jobState === 'processing' && stageIndex > 1)
+  const transactionReadingActive = jobState === 'processing' && !transactionReadingDone
+  const accountMatchingDone = jobState === 'review' || jobState === 'finalizing' || jobState === 'complete'
+  const accountMatchingActive = jobState === 'processing' && stageIndex > 1
+  const merchantReviewDone = jobState === 'finalizing' || jobState === 'complete'
+  const selectedUploadSummary = selectedFileIntents.length
+    ? selectedFileIntents.every((intent) => intent === selectedFileIntents[0])
+      ? uploadModeLabel(selectedFileIntents[0])
+      : 'Mixed statement types'
+    : uploadModeLabel(uploadMode)
 
   return <>
     <div className="page-header statement-page-header">
@@ -310,7 +413,7 @@ export default function StatementProcessingWorkspace() {
       <article className="panel upload-workspace">
         <div className="workspace-heading">
           <span className="workspace-icon"><Upload /></span>
-          <div><span className="overline">MONTHLY STATEMENTS</span><h2>Add at least three consecutive months</h2><p>Statement periods are confirmed after parsing. Selected PDFs are sent only to the local FinSim processing service.</p></div>
+          <div><span className="overline">MONTHLY STATEMENTS</span><h2>Add at least three monthly statements</h2><p>Consecutive months are preferred for stronger trends and forecasts, but non-consecutive statements can still be processed.</p></div>
         </div>
 
         <input
@@ -319,23 +422,31 @@ export default function StatementProcessingWorkspace() {
           type="file"
           accept="application/pdf,.pdf"
           multiple
-          onChange={(event) => selectFiles(Array.from(event.target.files || []))}
+          onChange={(event) => void selectFiles(Array.from(event.target.files || []))}
         />
 
         {files.length === 0 ? <div className="statement-dropzone">
           <FileText />
           <strong>Select monthly statement PDFs</strong>
-          <span>Three files minimum for a first financial picture</span>
+          <span>Three monthly periods minimum. You can mix checking, savings and credit card statements.</span>
           <div>
-            <button className="button button-primary" onClick={() => inputRef.current?.click()}>Choose PDFs</button>
+            <button className="button button-primary" onClick={() => setUploadDialogOpen(true)}>Choose PDFs</button>
             <button className="button button-secondary" onClick={useSafeSamples}>Use safe sample files</button>
           </div>
         </div> : <div className="selected-statements">
-          <div className="selected-summary"><strong>{files.length} statements selected</strong><button onClick={() => inputRef.current?.click()}>Replace files</button></div>
+          <div className="selected-summary"><strong>{files.length} statements selected</strong><span>{selectedUploadSummary}</span><button onClick={() => setUploadDialogOpen(true)}>Add more PDFs</button></div>
           {files.map((file, index) => <div className="selected-file" key={file.id}>
             <span><FileCheck2 /></span>
-            <div><strong>{file.name}</strong><small>{file.periodLabel} · {formatFileSize(file.size)}</small></div>
+            <div>
+              <strong>{file.name}</strong>
+              <small>{file.periodLabel} · {formatFileSize(file.size)}</small>
+              <div className="statement-file-tags">
+                <b>{uploadModeLabel(file.uploadMode)}</b>
+                {file.detectedAccountType && <b>Detected {detectedAccountLabel(file.detectedAccountType)}</b>}
+              </div>
+            </div>
             <i>{index + 1}</i>
+            {jobState === 'idle' && <button className="remove-selected-file" type="button" onClick={() => removeSelectedFile(index)} aria-label={`Remove ${file.name}`}><X /></button>}
           </div>)}
           <button className="button button-primary process-button" disabled={jobState !== 'idle'} onClick={startProcessing}>
             {jobState === 'idle' && <>Process statements <ArrowRight /></>}
@@ -354,27 +465,40 @@ export default function StatementProcessingWorkspace() {
         <div className="processing-copy">
           <span className="overline">PROCESSING JOB</span>
           <h2>{jobState === 'idle' && 'Waiting for statements'}{jobState === 'processing' && processingStages[stageIndex].label}{jobState === 'review' && `${unresolved.length} ${unresolved.length === 1 ? 'transaction needs' : 'transactions need'} your help`}{jobState === 'finalizing' && 'Applying your choices'}{jobState === 'complete' && 'Your categorized data is ready'}</h2>
-          <p>{jobState === 'idle' && 'Choose files to start the parsing and categorization flow.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim paused before using uncertain categories in your analytics.'}{jobState === 'finalizing' && 'Category totals and quality checks are being refreshed.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'Analytics are ready on the dashboard, analysis and forecast pages.')}</p>
+          <p>{jobState === 'idle' && 'Choose files to start building your spending picture.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim found a few transactions where your input will improve the report.'}{jobState === 'finalizing' && 'Your report is being refreshed with the confirmed categories.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'Insights and forecast are ready to review.')}</p>
           {jobState === 'review' && <button className="button button-primary button-compact" onClick={() => setReviewOpen(true)}>Review merchants <ArrowRight /></button>}
-          {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
+          {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><Sparkles /> {sampleMode ? 0 : completion.internalTransfers} account transfers matched</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
           {jobState === 'complete' && !sampleMode && <a className="button button-primary button-compact analytics-ready-link" href="/analytics">View analytics <ArrowRight /></a>}
         </div>
       </article>
     </section>
 
-    <section className="panel job-stage-panel">
-      <div className="panel-head"><div><span className="overline">LIVE PIPELINE</span><h2>From PDFs to categorized data</h2></div><span className="integration-badge">{sampleMode ? 'Safe sample preview' : jobId ? 'Local API connected' : 'Processing API ready'}</span></div>
-      <div className="job-stages">{processingStages.map((stage, index) => {
-        const done = jobState === 'review' || jobState === 'finalizing' || jobState === 'complete' || (jobState === 'processing' && index < stageIndex)
-        const active = jobState === 'processing' && index === stageIndex
-        return <div className={active ? 'job-stage active' : done ? 'job-stage done' : 'job-stage'} key={stage.id}>
-          <span>{done ? <Check /> : active ? <LoaderCircle className="spin" /> : index + 1}</span>
-          <div><strong>{stage.label}</strong><small>{stage.detail}</small></div>
-        </div>
-      })}</div>
+    <section className="panel statement-guidance-panel">
+      <div className="panel-head"><div><span className="overline">WHAT HAPPENS NEXT</span><h2>Your report is built in four clear checks</h2></div><span className="integration-badge">{files.length >= minimumStatementCount ? 'Ready to process' : `${minimumStatementCount - files.length} more needed`}</span></div>
+      <div className="job-stages guidance-stages">
+        <div className={files.length >= minimumStatementCount ? 'job-stage done' : 'job-stage'}><span>{files.length >= minimumStatementCount ? <Check /> : '1'}</span><div><strong>Statement coverage</strong><small>Use at least three months. Consecutive months are preferred for stronger forecast context.</small></div></div>
+        <div className={transactionReadingDone ? 'job-stage done' : transactionReadingActive ? 'job-stage active' : 'job-stage'}><span>{transactionReadingDone ? <Check /> : transactionReadingActive ? <LoaderCircle className="spin" /> : '2'}</span><div><strong>Transaction reading</strong><small>FinSim extracts dates, descriptions, amounts and balances from each PDF.</small></div></div>
+        <div className={accountMatchingDone ? 'job-stage done' : accountMatchingActive ? 'job-stage active' : 'job-stage'}><span>{accountMatchingDone ? <Check /> : accountMatchingActive ? <LoaderCircle className="spin" /> : '3'}</span><div><strong>Account matching</strong><small>Same-month payments and transfers across accounts are matched so they do not inflate spending.</small></div></div>
+        <div className={merchantReviewDone ? 'job-stage done' : jobState === 'review' ? 'job-stage active' : 'job-stage'}><span>{merchantReviewDone ? <Check /> : jobState === 'review' ? <RefreshCw /> : '4'}</span><div><strong>Merchant review</strong><small>Only unclear merchants ask for your input, and repeated merchants are grouped.</small></div></div>
+      </div>
+      <p className="statement-privacy-copy"><ShieldCheck size={15}/> FinSim does not ask for bank credentials. Uploaded statements are used only to create your report.</p>
     </section>
 
-    <div className="privacy-note panel"><LockKeyhole/><div><strong>Private by design.</strong><p>{sampleMode || files.length === 0 ? 'Safe sample files stay in browser memory.' : 'The local processing service removes temporary PDF copies as soon as parsing finishes.'} Account ownership and retention controls are the next security milestone.</p></div></div>
+    {uploadDialogOpen && <div className="review-backdrop" role="presentation">
+      <section className="upload-choice-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-choice-title">
+        <div className="review-dialog-head">
+          <div><span className="overline">ADD STATEMENTS</span><h2 id="upload-choice-title">What are you uploading?</h2></div>
+          <button autoFocus onClick={() => setUploadDialogOpen(false)} aria-label="Close upload options"><X /></button>
+        </div>
+        <p>Choose the closest option. FinSim still checks every PDF and looks for same-month transfers or card payments across accounts.</p>
+        <div className="upload-choice-grid">
+          <button type="button" onClick={() => chooseUploadMode('single')}><FileText /><strong>Single bank account</strong><span>Checking or savings statements from one account.</span></button>
+          <button type="button" onClick={() => chooseUploadMode('multiple')}><Sparkles /><strong>Multiple accounts</strong><span>Best for checking, savings and transfers between your own accounts.</span></button>
+          <button type="button" onClick={() => chooseUploadMode('credit')}><FileCheck2 /><strong>Credit card statements</strong><span>FinSim matches card payments back to bank account withdrawals when possible.</span></button>
+        </div>
+        <small>Tip: Upload all statements that overlap the same month in one run when you want payment and transfer matching. Credit card uploads are verified after FinSim reads the PDFs.</small>
+      </section>
+    </div>}
 
     {reviewOpen && currentReview && <div className="review-backdrop" role="presentation">
       <section className="review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-title">
@@ -398,8 +522,19 @@ export default function StatementProcessingWorkspace() {
           </select>
         </fieldset>
         <label className="remember-choice"><input type="checkbox" checked={rememberMerchant} onChange={(event) => setRememberMerchant(event.target.checked)}/><span><strong>Remember this merchant</strong><small>Use the same category for future matching transactions.</small></span></label>
-        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only in this preview.' : 'Your choice is saved with this account processing job.'}</span></div>
+        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only for this sample run.' : 'Your choice is saved with this account processing job.'}</span></div>
       </section>
     </div>}
   </>
+}
+
+async function statementFileHash(file: File) {
+  if (!globalThis.crypto?.subtle) {
+    return `${file.name}:${file.size}:${file.lastModified}`
+  }
+  const buffer = await file.arrayBuffer()
+  const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', buffer)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
 }

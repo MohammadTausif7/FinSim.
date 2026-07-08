@@ -6,11 +6,11 @@ import hashlib
 import shutil
 import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import BinaryIO, Callable, Literal, Mapping, Sequence
+from typing import BinaryIO, Callable, Literal, Mapping, Sequence, cast
 from uuid import uuid4
 
 from finsim_analytics import build_report
@@ -21,6 +21,7 @@ from finsim_transactions import apply_feedback, process_files
 from finsim_transactions.cleaning import normalize_description
 from finsim_transactions.feedback import FeedbackAuditRecord, FeedbackError, parse_feedback_payload
 from finsim_transactions.models import ProcessedTransaction, QualityReport
+from finsim_transactions.processor import update_quality_report
 from finsim_transactions.rules import available_categories, load_rulebook
 
 from .review import review_reasons, review_suggestions, review_summary
@@ -32,6 +33,7 @@ MAXIMUM_FILE_BYTES = 25 * 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
 JobStatus = Literal["processing", "review", "complete", "error"]
+UploadMode = Literal["single", "multiple", "credit"]
 
 
 class JobNotFoundError(LookupError):
@@ -55,6 +57,8 @@ class JobRecord:
     filenames: list[str]
     workspace: Path
     statement_paths: list[Path]
+    upload_mode: UploadMode = "multiple"
+    upload_intents: list[UploadMode] = field(default_factory=list)
     status: JobStatus = "processing"
     stage: str = "validate"
     progress: int = 14
@@ -92,11 +96,15 @@ class ProcessingService:
         *,
         user_id: str | None = None,
         merchant_rules: Mapping[str, str] | None = None,
+        upload_mode: str = "multiple",
+        upload_intents: Sequence[str] | None = None,
     ) -> JobRecord:
         if not MINIMUM_STATEMENTS <= len(uploads) <= MAXIMUM_STATEMENTS:
             raise ValueError(
                 f"Upload between {MINIMUM_STATEMENTS} and {MAXIMUM_STATEMENTS} statements"
             )
+        normalized_upload_mode = self._clean_upload_mode(upload_mode)
+        normalized_upload_intents = self._clean_upload_intents(upload_intents, len(uploads), normalized_upload_mode)
 
         job_id = uuid4().hex
         workspace = Path(tempfile.mkdtemp(prefix=f"finsim-{job_id[:8]}-"))
@@ -131,6 +139,8 @@ class ProcessingService:
             filenames,
             workspace,
             statement_paths,
+            upload_mode=normalized_upload_mode,
+            upload_intents=normalized_upload_intents,
             user_id=user_id,
             merchant_rules=dict(merchant_rules or {}),
         )
@@ -144,6 +154,7 @@ class ProcessingService:
             self._set_progress(job, "extract", 42)
             parse_results = [self._parse_statement(path) for path in job.statement_paths]
             job.parse_summaries = [result.summary() for result in parse_results]
+            self._validate_parsed_statements(job, parse_results)
 
             self._set_progress(job, "periods", 58)
             self._validate_months(parse_results)
@@ -160,6 +171,11 @@ class ProcessingService:
                 csv_paths,
                 merchant_rules=job.merchant_rules,
             )
+            self._set_progress(job, "match", 94)
+            transactions, internal_matches = self._mark_internal_transfers(transactions)
+            if internal_matches:
+                report.internal_transfer_matches = internal_matches
+                update_quality_report(transactions, report)
             with self._lock:
                 job.transactions = transactions
                 job.report = report
@@ -176,6 +192,15 @@ class ProcessingService:
                 job.error = "An unexpected processing error occurred"
         finally:
             self._remove_workspace(job)
+
+    def validate_job_uploads(self, job_id: str) -> None:
+        """Parse the uploaded files once before accepting a job into the queue."""
+
+        job = self.get_job(job_id)
+        parse_results = [self._parse_statement(path) for path in job.statement_paths]
+        job.parse_summaries = [result.summary() for result in parse_results]
+        self._validate_parsed_statements(job, parse_results)
+        self._validate_months(parse_results)
 
     def apply_job_feedback(self, job_id: str, payload: object) -> JobRecord:
         job = self.get_job(job_id)
@@ -230,6 +255,7 @@ class ProcessingService:
             "filenames": job.filenames,
             "review_count": len(self._category_review_groups(job)),
             "transaction_count": len(job.transactions),
+            "statement_types": self._statement_type_view(job),
             "error": job.error,
         }
 
@@ -314,6 +340,122 @@ class ProcessingService:
         return digest.hexdigest(), size, signature
 
     @staticmethod
+    def _clean_upload_mode(upload_mode: str) -> UploadMode:
+        cleaned = (upload_mode or "multiple").strip().lower()
+        if cleaned in {"single", "multiple", "credit"}:
+            return cast(UploadMode, cleaned)
+        raise ValueError("Choose single account, multiple accounts, or credit card statements")
+
+    @classmethod
+    def _clean_upload_intents(
+        cls,
+        upload_intents: Sequence[str] | None,
+        file_count: int,
+        fallback: UploadMode,
+    ) -> list[UploadMode]:
+        if upload_intents is None:
+            return [fallback for _ in range(file_count)]
+        if len(upload_intents) != file_count:
+            raise ValueError("Every uploaded statement must include one upload type")
+        return [cls._clean_upload_mode(intent) for intent in upload_intents]
+
+    @classmethod
+    def _validate_parsed_statements(
+        cls,
+        job: JobRecord,
+        results: Sequence[ParseResult],
+    ) -> None:
+        cls._validate_statement_types(job, results)
+        cls._validate_statement_content(job, results)
+
+    @staticmethod
+    def _validate_statement_types(job: JobRecord, results: Sequence[ParseResult]) -> None:
+        account_types = {result.metadata.account_type for result in results}
+        institutions = {result.metadata.institution for result in results}
+
+        for filename, intent, result in zip(job.filenames, job.upload_intents, results):
+            if intent == "credit" and result.metadata.account_type != "credit_card":
+                account_type = result.metadata.account_type.replace("_", " ")
+                raise ValueError(
+                    f"{filename} was added as a credit card statement, but FinSim detected a "
+                    f"{account_type} statement. Remove it or add it again under the correct upload type."
+                )
+
+        if job.upload_mode == "credit":
+            for filename, result in zip(job.filenames, results):
+                if result.metadata.account_type != "credit_card":
+                    account_type = result.metadata.account_type.replace("_", " ")
+                    raise ValueError(
+                        f"{filename} appears to be a {account_type} statement. "
+                        "Choose the credit card option only for credit card statements."
+                    )
+            return
+
+        if job.upload_mode == "single" and (len(account_types) > 1 or len(institutions) > 1):
+            raise ValueError(
+                "Single account uploads cannot mix banks or account types. "
+                "Choose multiple accounts when uploading checking, savings, or credit card statements together."
+            )
+
+    @staticmethod
+    def _statement_type_view(job: JobRecord) -> list[dict[str, str]]:
+        views: list[dict[str, str]] = []
+        for index, summary in enumerate(job.parse_summaries):
+            metadata = summary.get("metadata") if isinstance(summary, dict) else None
+            if not isinstance(metadata, dict):
+                continue
+            views.append(
+                {
+                    "filename": job.filenames[index] if index < len(job.filenames) else "",
+                    "institution": str(metadata.get("institution") or "unknown"),
+                    "account_type": str(metadata.get("account_type") or "unknown"),
+                }
+            )
+        return views
+
+    @classmethod
+    def _validate_statement_content(
+        cls,
+        job: JobRecord,
+        results: Sequence[ParseResult],
+    ) -> None:
+        seen_fingerprints: dict[tuple[object, ...], str] = {}
+        for filename, result in zip(job.filenames, results):
+            if not result.transactions:
+                raise ValueError(f"{filename} did not contain any transactions to process")
+            fingerprint = cls._statement_fingerprint(result)
+            if fingerprint in seen_fingerprints:
+                original = seen_fingerprints[fingerprint]
+                raise ValueError(
+                    f"{filename} appears to be the same statement as {original}, "
+                    "even though the file names differ."
+                )
+            seen_fingerprints[fingerprint] = filename
+
+    @staticmethod
+    def _statement_fingerprint(result: ParseResult) -> tuple[object, ...]:
+        metadata = result.metadata
+        transaction_rows = tuple(
+            (
+                transaction.transaction_id,
+                transaction.posted_at.isoformat(),
+                normalize_description(transaction.description_raw),
+                format(transaction.amount, ".2f"),
+                transaction.transaction_type,
+            )
+            for transaction in result.transactions
+        )
+        return (
+            metadata.institution,
+            metadata.account_type,
+            metadata.period_start.isoformat() if metadata.period_start else "",
+            metadata.period_end.isoformat() if metadata.period_end else "",
+            "" if metadata.beginning_balance is None else format(metadata.beginning_balance, ".2f"),
+            "" if metadata.ending_balance is None else format(metadata.ending_balance, ".2f"),
+            transaction_rows,
+        )
+
+    @staticmethod
     def _validate_months(results: Sequence[ParseResult]) -> None:
         periods = []
         for result in results:
@@ -324,8 +466,6 @@ class ProcessingService:
         ordered = sorted(set(periods))
         if len(ordered) < MINIMUM_STATEMENTS:
             raise ValueError("Statements must cover at least three distinct monthly periods")
-        if any(current - previous != 1 for previous, current in zip(ordered, ordered[1:])):
-            raise ValueError("Statements must cover consecutive monthly periods")
 
     @staticmethod
     def _category_review_rows(job: JobRecord) -> list[ProcessedTransaction]:
@@ -399,9 +539,65 @@ class ProcessingService:
                 category=row.category,
                 category_confidence=row.category_confidence,
                 needs_review=row.needs_review,
+                category_source=row.category_source,
             )
             for row in rows
         ]
+
+    @staticmethod
+    def _mark_internal_transfers(
+        rows: list[ProcessedTransaction],
+    ) -> tuple[list[ProcessedTransaction], int]:
+        matched_indexes: set[int] = set()
+        credit_indexes: dict[tuple[str, Decimal], list[int]] = {}
+        for index, row in enumerate(rows):
+            if row.source.amount <= 0:
+                continue
+            key = (row.source.posted_at.strftime("%Y-%m"), row.source.amount.copy_abs())
+            credit_indexes.setdefault(key, []).append(index)
+
+        pairs = 0
+        for debit_index, debit in enumerate(rows):
+            if debit.source.amount >= 0 or debit_index in matched_indexes:
+                continue
+            key = (debit.source.posted_at.strftime("%Y-%m"), debit.source.amount.copy_abs())
+            for credit_index in credit_indexes.get(key, []):
+                if credit_index in matched_indexes:
+                    continue
+                credit = rows[credit_index]
+                if credit.source.source_statement_id == debit.source.source_statement_id:
+                    continue
+                days_apart = abs((credit.source.posted_at - debit.source.posted_at).days)
+                if days_apart > 3:
+                    continue
+                if days_apart and not (
+                    _looks_like_internal_movement(debit)
+                    or _looks_like_internal_movement(credit)
+                ):
+                    continue
+                matched_indexes.update({debit_index, credit_index})
+                pairs += 1
+                break
+
+        if not matched_indexes:
+            return rows, 0
+
+        marked: list[ProcessedTransaction] = []
+        for index, row in enumerate(rows):
+            if index not in matched_indexes:
+                marked.append(row)
+                continue
+            marked.append(
+                replace(
+                    row,
+                    source=replace(row.source, transaction_type="transfer"),
+                    category="Transfers",
+                    category_source="internal_match",
+                    category_confidence=Decimal("1.00"),
+                    needs_review=False,
+                )
+            )
+        return marked, pairs
 
     def _persist_if_complete(self, job: JobRecord) -> None:
         if (
@@ -424,3 +620,23 @@ class ProcessingService:
     @staticmethod
     def _remove_workspace(job: JobRecord) -> None:
         shutil.rmtree(job.workspace, ignore_errors=True)
+
+
+def _looks_like_internal_movement(row: ProcessedTransaction) -> bool:
+    searchable = normalize_description(
+        f"{row.source.description_raw} {row.merchant_clean} {row.source.transaction_type} {row.category}"
+    )
+    markers = (
+        "TRANSFER",
+        "PAYMENT",
+        "AUTOPAY",
+        "AUTO PAY",
+        "CREDIT CARD",
+        "CRD",
+        "CARD",
+        "ONLINE",
+        "MOBILE BANKING",
+        "BANK",
+        "ACH",
+    )
+    return any(marker in searchable for marker in markers)

@@ -19,6 +19,12 @@ export type SigninResponse = {
   user: AccountUser
 }
 
+export type SigninCodeResponse = {
+  login_challenge_id: string
+  verification_code: string
+  message: string
+}
+
 const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 const sessionKey = 'finsim-session-token'
 const userKey = 'finsim-account-user'
@@ -40,11 +46,44 @@ export async function verifyEmail(token: string) {
   })
 }
 
+export async function updateAccountSettings(settings: {
+  full_name?: string
+  theme?: AccountUser['theme']
+  monthly_email?: boolean
+}) {
+  const response = await request<{ user: AccountUser }>('/api/accounts/settings', {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(settings),
+  })
+  localStorage.setItem(userKey, JSON.stringify(response.user))
+  window.dispatchEvent(new Event(sessionEvent))
+  return response
+}
+
 export async function signin(email: string, password: string) {
   const response = await request<SigninResponse>('/api/accounts/signin', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
+  })
+  saveSession(response.session_token, response.user)
+  return response
+}
+
+export async function requestSigninCode(email: string, password: string) {
+  return request<SigninCodeResponse>('/api/accounts/signin/request-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  })
+}
+
+export async function verifySigninCode(loginChallengeId: string, code: string) {
+  const response = await request<SigninResponse>('/api/accounts/signin/verify-code', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ login_challenge_id: loginChallengeId, code }),
   })
   saveSession(response.session_token, response.user)
   return response
@@ -116,6 +155,9 @@ async function request<T>(path: string, init: RequestInit, parseJson = true): Pr
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
+    if (response.status === 401 && !path.includes('/signin')) {
+      clearSession()
+    }
     throw new Error(payload?.detail || `Account service returned ${response.status}.`)
   }
   if (!parseJson) return undefined as T

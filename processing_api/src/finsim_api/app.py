@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import json
+import os
 from typing import Annotated
 
-from fastapi import BackgroundTasks, FastAPI, File, Header, HTTPException, Response, UploadFile, status
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -44,6 +46,13 @@ class SigninBody(BaseModel):
     password: str
 
 
+class VerifySigninCodeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login_challenge_id: str = Field(min_length=1)
+    code: str = Field(min_length=6, max_length=12)
+
+
 class VerifyEmailBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -77,7 +86,7 @@ def create_app(
     api = FastAPI(title="FinSim Processing API", version="0.1.0", lifespan=lifespan)
     api.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_origins=_cors_origins(),
         allow_credentials=False,
         allow_methods=["GET", "PATCH", "POST", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
@@ -105,6 +114,20 @@ def create_app(
     def signin(body: SigninBody) -> dict[str, object]:
         try:
             return accounts.signin(body.email, body.password)
+        except (AccountError, AuthError) as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+
+    @api.post("/api/accounts/signin/request-code")
+    def request_signin_code(body: SigninBody) -> dict[str, object]:
+        try:
+            return accounts.request_signin_code(body.email, body.password)
+        except (AccountError, AuthError) as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+
+    @api.post("/api/accounts/signin/verify-code")
+    def verify_signin_code(body: VerifySigninCodeBody) -> dict[str, object]:
+        try:
+            return accounts.verify_signin_code(body.login_challenge_id, body.code)
         except (AccountError, AuthError) as error:
             raise HTTPException(status_code=401, detail=str(error)) from error
 
@@ -173,6 +196,8 @@ def create_app(
     def create_processing_job(
         background_tasks: BackgroundTasks,
         files: Annotated[list[UploadFile], File(description="Three to twelve PDF statements")],
+        upload_mode: Annotated[str, Form()] = "multiple",
+        upload_intents: Annotated[str | None, Form()] = None,
         authorization: Annotated[str | None, Header()] = None,
     ) -> dict[str, object]:
         user = _require_user(accounts, authorization)
@@ -181,12 +206,21 @@ def create_app(
             for file in files
         ]
         try:
+            parsed_upload_intents = _parse_upload_intents(upload_intents)
             job = processing.create_job(
                 uploads,
                 user_id=user.user_id,
                 merchant_rules=processing.saved_merchant_rules(user.user_id),
+                upload_mode=upload_mode,
+                upload_intents=parsed_upload_intents,
             )
-        except ValueError as error:
+            processing.validate_job_uploads(job.job_id)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
+            if "job" in locals():
+                try:
+                    processing.delete_job(job.job_id)
+                except JobNotFoundError:
+                    pass
             raise HTTPException(status_code=400, detail=str(error)) from error
         background_tasks.add_task(processing.process_job, job.job_id)
         return processing.job_view(job)
@@ -259,6 +293,18 @@ def _require_user(accounts: AccountService, authorization: str | None):
         raise HTTPException(status_code=401, detail=str(error)) from error
 
 
+def _parse_upload_intents(raw_value: str | None) -> list[str] | None:
+    if raw_value is None or not raw_value.strip():
+        return None
+    try:
+        value = json.loads(raw_value)
+    except json.JSONDecodeError as error:
+        raise ValueError("Upload type information could not be read") from error
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("Upload type information must be a list")
+    return value
+
+
 def _get_owned_job(
     processing: ProcessingService,
     accounts: AccountService,
@@ -277,6 +323,14 @@ def _get_job(processing: ProcessingService, job_id: str):
         return processing.get_job(job_id)
     except JobNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+def _cors_origins() -> list[str]:
+    configured = os.environ.get("FINSIM_CORS_ORIGINS", "")
+    origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
+    if origins:
+        return origins
+    return ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 
 app = create_app()

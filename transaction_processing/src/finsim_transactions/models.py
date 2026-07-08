@@ -94,6 +94,7 @@ class QualityReport:
     duplicates_removed: int = 0
     categorized_rows: int = 0
     review_rows: int = 0
+    internal_transfer_matches: int = 0
     low_extraction_rows: int = 0
     zero_amount_rows: int = 0
     debit_total: Decimal = Decimal("0.00")

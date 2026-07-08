@@ -19,6 +19,7 @@ class ProcessedTransaction:
     category: str
     category_confidence: Decimal
     needs_review: bool
+    category_source: str = ""
 
     @property
     def month(self) -> str:
@@ -26,9 +27,21 @@ class ProcessedTransaction:
 
     @property
     def spend_amount(self) -> Decimal:
+        if self.is_internal_transfer:
+            return Decimal("0.00")
         if self.amount >= 0:
             return Decimal("0.00")
         return -self.amount
+
+    @property
+    def income_amount(self) -> Decimal:
+        if self.is_internal_transfer or self.amount <= 0:
+            return Decimal("0.00")
+        return self.amount
+
+    @property
+    def is_internal_transfer(self) -> bool:
+        return self.category_source == "internal_match"
 
 
 @dataclass(frozen=True, slots=True)

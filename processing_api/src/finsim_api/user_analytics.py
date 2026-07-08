@@ -38,4 +38,5 @@ def _to_analytics_transaction(row: dict[str, object]) -> AnalyticsTransaction:
         category=str(row["category"]),
         category_confidence=Decimal(str(row["category_confidence"])),
         needs_review=bool(row["needs_review"]),
+        category_source=str(row.get("category_source", "")),
     )

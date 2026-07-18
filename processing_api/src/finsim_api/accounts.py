@@ -158,8 +158,8 @@ class AccountService:
             code = f"{secrets.randbelow(1_000_000):06d}"
             connection.execute(
                 """
-                INSERT INTO login_challenges (challenge_id, user_id, code_hash, expires_at, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO login_challenges (challenge_id, user_id, purpose, code_hash, expires_at, created_at)
+                VALUES (?, ?, 'signin', ?, ?, ?)
                 """,
                 (
                     challenge_id,
@@ -188,6 +188,7 @@ class AccountService:
                 FROM login_challenges
                 JOIN users ON users.user_id = login_challenges.user_id
                 WHERE login_challenges.challenge_id = ?
+                    AND login_challenges.purpose = 'signin'
                 """,
                 (cleaned_challenge,),
             ).fetchone()
@@ -202,6 +203,73 @@ class AccountService:
             connection.execute("DELETE FROM login_challenges WHERE challenge_id = ?", (cleaned_challenge,))
             session_token = self._start_session(connection, row["user_id"])
         return {"session_token": session_token, "user": self._row_to_user(row).as_dict()}
+
+    def request_data_deletion_code(self, session_token: str, password: str) -> dict[str, object]:
+        """Verify the password and create a short-lived code for data deletion."""
+
+        user = self.get_user_for_session(session_token)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM users WHERE user_id = ?",
+                (user.user_id,),
+            ).fetchone()
+            if row is None or not hmac.compare_digest(
+                _hash_password(password, row["password_salt"]),
+                row["password_hash"],
+            ):
+                raise AuthError("Password is incorrect")
+
+            challenge_id = secrets.token_urlsafe(24)
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            connection.execute(
+                """
+                INSERT INTO login_challenges (challenge_id, user_id, purpose, code_hash, expires_at, created_at)
+                VALUES (?, ?, 'data_deletion', ?, ?, ?)
+                """,
+                (
+                    challenge_id,
+                    user.user_id,
+                    _hash_code(code),
+                    _future(minutes=LOGIN_CODE_MINUTES),
+                    _now(),
+                ),
+            )
+        return {
+            "deletion_challenge_id": challenge_id,
+            "verification_code": code,
+            "message": "Verification code sent to email.",
+        }
+
+    def verify_data_deletion_code(self, session_token: str, challenge_id: str, code: str) -> AccountUser:
+        """Confirm the data deletion code for the signed-in account."""
+
+        user = self.get_user_for_session(session_token)
+        cleaned_challenge = challenge_id.strip()
+        cleaned_code = "".join(character for character in code.strip() if character.isdigit())
+        if not cleaned_challenge or len(cleaned_code) != 6:
+            raise AuthError("A valid six digit verification code is required")
+
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM login_challenges
+                WHERE challenge_id = ?
+                    AND user_id = ?
+                    AND purpose = 'data_deletion'
+                """,
+                (cleaned_challenge, user.user_id),
+            ).fetchone()
+            if row is None:
+                raise AuthError("Verification code is invalid or expired")
+            if _parse_time(row["expires_at"]) < datetime.now(timezone.utc):
+                connection.execute("DELETE FROM login_challenges WHERE challenge_id = ?", (cleaned_challenge,))
+                raise AuthError("Verification code is invalid or expired")
+            if not hmac.compare_digest(_hash_code(cleaned_code), row["code_hash"]):
+                raise AuthError("Verification code is incorrect")
+
+            connection.execute("DELETE FROM login_challenges WHERE challenge_id = ?", (cleaned_challenge,))
+        return user
 
     def signout(self, session_token: str) -> None:
         with self._connect() as connection:
@@ -290,6 +358,7 @@ class AccountService:
                 CREATE TABLE IF NOT EXISTS login_challenges (
                     challenge_id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
+                    purpose TEXT NOT NULL DEFAULT 'signin',
                     code_hash TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
                     created_at TEXT NOT NULL,
@@ -297,6 +366,14 @@ class AccountService:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(login_challenges)").fetchall()
+            }
+            if "purpose" not in columns:
+                connection.execute(
+                    "ALTER TABLE login_challenges ADD COLUMN purpose TEXT NOT NULL DEFAULT 'signin'"
+                )
 
     def _get_user_by_id(self, user_id: str) -> AccountUser:
         with self._connect() as connection:

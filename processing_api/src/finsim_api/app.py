@@ -21,6 +21,7 @@ from .service import (
 )
 from .storage import UserDataStore
 from .user_analytics import account_analytics_payload
+from finsim_transactions.rules import available_categories, load_rulebook
 
 
 class FeedbackBody(BaseModel):
@@ -53,6 +54,19 @@ class VerifySigninCodeBody(BaseModel):
     code: str = Field(min_length=6, max_length=12)
 
 
+class DeleteAccountDataCodeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(min_length=8, max_length=128)
+
+
+class ConfirmDeleteAccountDataBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deletion_challenge_id: str = Field(min_length=1)
+    code: str = Field(min_length=6, max_length=12)
+
+
 class VerifyEmailBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -65,6 +79,12 @@ class AccountSettingsBody(BaseModel):
     full_name: str | None = None
     theme: str | None = None
     monthly_email: bool | None = None
+
+
+class UpdateTransactionCategoryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: str = Field(min_length=2, max_length=40)
 
 
 def create_app(
@@ -131,6 +151,36 @@ def create_app(
         except (AccountError, AuthError) as error:
             raise HTTPException(status_code=401, detail=str(error)) from error
 
+    @api.post("/api/accounts/data-deletion/request-code")
+    def request_account_data_deletion_code(
+        body: DeleteAccountDataCodeBody,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        try:
+            return accounts.request_data_deletion_code(bearer_token(authorization), body.password)
+        except AuthError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+
+    @api.post("/api/accounts/data-deletion/confirm")
+    def confirm_account_data_deletion(
+        body: ConfirmDeleteAccountDataBody,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        try:
+            user = accounts.verify_data_deletion_code(
+                bearer_token(authorization),
+                body.deletion_challenge_id,
+                body.code,
+            )
+        except AuthError as error:
+            raise HTTPException(status_code=401, detail=str(error)) from error
+        deleted_counts = store.clear_user_data(user.user_id)
+        return {
+            "deleted": True,
+            "deleted_counts": deleted_counts,
+            "message": "Account statement data was deleted.",
+        }
+
     @api.post("/api/accounts/signout", status_code=status.HTTP_204_NO_CONTENT)
     def signout(authorization: Annotated[str | None, Header()] = None) -> Response:
         try:
@@ -179,6 +229,20 @@ def create_app(
     ) -> dict[str, object]:
         user = _require_user(accounts, authorization)
         return {"items": processing.transactions_for_user(user.user_id, limit)}
+
+    @api.patch("/api/accounts/transactions/{transaction_id}/category")
+    def update_account_transaction_category(
+        transaction_id: str,
+        body: UpdateTransactionCategoryBody,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, object]:
+        user = _require_user(accounts, authorization)
+        category = " ".join(body.category.strip().split())
+        if category not in _allowed_transaction_categories():
+            raise HTTPException(status_code=400, detail="Choose a supported transaction category")
+        if not store.update_transaction_category(user.user_id, transaction_id, category):
+            raise HTTPException(status_code=404, detail="Transaction was not found")
+        return {"transaction_id": transaction_id, "category": category}
 
     @api.get("/api/accounts/analytics")
     def account_analytics(
@@ -331,6 +395,10 @@ def _cors_origins() -> list[str]:
     if origins:
         return origins
     return ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
+def _allowed_transaction_categories() -> set[str]:
+    return set(available_categories(load_rulebook()))
 
 
 app = create_app()

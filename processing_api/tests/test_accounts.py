@@ -32,7 +32,7 @@ class AccountApiTests(unittest.TestCase):
             "/api/accounts/signup",
             json={
                 "full_name": "Test User",
-                "email": "mohammad@example.com",
+                "email": "owner@example.com",
                 "password": "securepass123",
             },
         )
@@ -42,7 +42,7 @@ class AccountApiTests(unittest.TestCase):
 
         blocked = self.client.post(
             "/api/accounts/signin",
-            json={"email": "mohammad@example.com", "password": "securepass123"},
+            json={"email": "owner@example.com", "password": "securepass123"},
         )
         self.assertEqual(blocked.status_code, 401)
         self.assertIn("verified", blocked.json()["detail"])
@@ -53,7 +53,7 @@ class AccountApiTests(unittest.TestCase):
 
         challenge = self.client.post(
             "/api/accounts/signin/request-code",
-            json={"email": "mohammad@example.com", "password": "securepass123"},
+            json={"email": "owner@example.com", "password": "securepass123"},
         )
         self.assertEqual(challenge.status_code, 200)
         self.assertEqual(len(challenge.json()["verification_code"]), 6)
@@ -66,7 +66,7 @@ class AccountApiTests(unittest.TestCase):
 
         challenge = self.client.post(
             "/api/accounts/signin/request-code",
-            json={"email": "mohammad@example.com", "password": "securepass123"},
+            json={"email": "owner@example.com", "password": "securepass123"},
         ).json()
         signin = self.client.post(
             "/api/accounts/signin/verify-code",
@@ -80,7 +80,7 @@ class AccountApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {session}"},
         )
         self.assertEqual(current.status_code, 200)
-        self.assertEqual(current.json()["user"]["email"], "mohammad@example.com")
+        self.assertEqual(current.json()["user"]["email"], "owner@example.com")
 
     def test_duplicate_email_and_short_password_are_rejected(self) -> None:
         weak = self.client.post(

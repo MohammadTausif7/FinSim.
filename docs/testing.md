@@ -42,7 +42,7 @@ Then test this flow in the browser:
 4. Verify the account.
 5. Confirm that the app shell shows account data instead of only sample data.
 6. Go to `Statements`.
-7. Upload three consecutive monthly PDFs.
+7. Upload at least three monthly PDFs. Consecutive months are preferred for stronger trends.
 8. Confirm invalid files, duplicate files, non PDF files, or missing months are rejected.
 9. Complete the merchant review popup if it appears.
 10. Confirm the dashboard updates with saved account analytics.

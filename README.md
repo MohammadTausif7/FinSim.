@@ -1,8 +1,8 @@
 # FinSim. Finance Simplified
 
-FinSim turns monthly bank statements into a clear personal finance workspace. A user creates an account, verifies the account, uploads at least three consecutive monthly PDF statements, reviews any uncertain merchant categories, and then sees dashboard analytics, spending trends, anomaly candidates, and a next month forecast.
+FinSim turns monthly bank statements into a clear personal finance workspace. A user creates an account, verifies the account, uploads at least three monthly PDF statements, reviews any uncertain merchant categories, and then sees dashboard analytics, spending trends, anomaly candidates, and a next month forecast.
 
-This repository is a graduate team project that has grown from a product concept into an integrated MVP. It now has a working React frontend, a FastAPI processing API, local account persistence, PDF statement parsing, transaction cleaning and categorization, analytics, forecasting, anomaly detection, and user saved merchant feedback.
+This repository contains an integrated MVP with a React frontend, a FastAPI backend, local account persistence, PDF statement parsing, transaction cleaning and categorization, analytics, forecasting, anomaly detection, and saved merchant feedback.
 
 ## Current project status
 
@@ -10,7 +10,7 @@ Working now:
 
 - Responsive landing page, app shell, dashboard, analytics, forecast, statements, settings, sign up, sign in, and email verification screens
 - Local account system with verified sign in, sign out, user scoped processing jobs, and saved account analytics
-- Upload flow for 3 to 12 PDF statements, with file type, PDF signature, duplicate, size, and consecutive month checks
+- Upload flow for 3 to 12 PDF statements, with file type, PDF signature, duplicate, size, and statement identity checks
 - Bank statement adapters for MidFirst, Discover, and Bank of America style statements
 - Transaction extraction to a shared CSV shaped contract
 - Merchant cleanup, category rulebook, user review loop, remembered merchant choices, and review explanations
@@ -34,7 +34,7 @@ Still required before a real public financial product:
 | `document_intelligence/` | PDF text/table extraction and bank specific adapters |
 | `transaction_processing/` | Cleaning, merchant normalization, categorization, feedback, and rulebook |
 | `analytics_engine/` | Monthly analytics, anomaly candidates, and forecast ranges |
-| `docs/` | Architecture, setup, deployment, testing, and sprint planning notes |
+| `docs/` | Architecture, setup, deployment, testing, and product roadmap notes |
 | `.github/` | Pull request template, issue template, and CI workflow |
 
 ## Team roles
@@ -120,7 +120,7 @@ http://localhost:5173
 5. Copy the local verification token shown on screen.
 6. Paste the token into the verification field and continue.
 7. Go to `Statements`.
-8. Upload at least three consecutive monthly PDF statements.
+8. Upload at least three monthly PDF statements. Consecutive months are preferred for stronger trends.
 9. Wait for parsing and categorization.
 10. Review uncertain merchants if the popup appears.
 11. Go to `Dashboard`, `Analytics`, and `Forecast`.
@@ -159,7 +159,7 @@ See [SECURITY.md](SECURITY.md) and [docs/deployment.md](docs/deployment.md) befo
 
 - [VS Code setup](docs/vscode-setup.md)
 - [Architecture notes](docs/architecture.md)
-- [Sprint plan](docs/sprint-plan.md)
+- [Product roadmap](docs/roadmap.md)
 - [Testing checklist](docs/testing.md)
 - [Deployment guide](docs/deployment.md)
 - [GitHub workflow](docs/github-setup.md)

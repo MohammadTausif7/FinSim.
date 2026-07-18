@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import StatementProcessingWorkspace from './features/statements/StatementProcessingWorkspace'
-import { getStoredUser, onSessionChange, requestSigninCode, signout, signup, updateAccountSettings, verifyEmail, verifySigninCode } from './features/account/accountApi'
+import {
+  confirmAccountDataDeletion,
+  getStoredUser,
+  onSessionChange,
+  requestAccountDataDeletionCode,
+  requestSigninCode,
+  signout,
+  signup,
+  updateAccountSettings,
+  updateTransactionCategory,
+  verifyEmail,
+  verifySigninCode,
+} from './features/account/accountApi'
 import {
   clearCachedAnalytics,
   formatMoney,
@@ -9,9 +21,11 @@ import {
   latestCategories,
   latestMonth,
   recentTransactions,
+  refreshSavedAccountAnalytics,
   sampleAnalyticsSnapshot,
   sourceLabel,
   topTrend,
+  updateCachedTransactionCategory,
   useAnalyticsSnapshot,
   type AnomalyCandidate,
   type AnalyticsSnapshot,
@@ -81,6 +95,30 @@ const categories = [
 
 const categoryColors = ['#2563eb', '#7c3aed', '#059669', '#f97316', '#e11d48', '#0891b2', '#ca8a04', '#64748b']
 const merchantTones = ['green', 'blue', 'lime', 'orange', 'violet']
+const editableTransactionCategories = [
+  'Income',
+  'Credits',
+  'Transfers',
+  'Payments',
+  'Refunds',
+  'Housing',
+  'Groceries',
+  'Dining',
+  'Shopping',
+  'Subscriptions',
+  'Utilities',
+  'Transport',
+  'Travel',
+  'Healthcare',
+  'Insurance',
+  'Education',
+  'Entertainment',
+  'Services',
+  'Charity',
+  'Fees',
+  'Interest',
+  'Other',
+]
 
 function categoryColor(index: number) {
   return categoryColors[index % categoryColors.length]
@@ -116,6 +154,32 @@ function transactionPreview(snapshot: AnalyticsSnapshot) {
 
 function hasFinancialData(snapshot: AnalyticsSnapshot) {
   return snapshot.transactionCount > 0 && snapshot.analytics.monthly_summaries.length > 0
+}
+
+type TransactionRecord = AnalyticsSnapshot['transactions'][number]
+
+function transactionRecordId(row: TransactionRecord, fallbackIndex: number) {
+  return String(row.transaction_id || `${row.posted_at || 'unknown'}-${row.description_raw || row.merchant_clean || fallbackIndex}`)
+}
+
+function transactionMerchant(row: TransactionRecord) {
+  return String(row.merchant_clean || row.merchant || row.description_raw || 'Transaction')
+}
+
+function transactionDescription(row: TransactionRecord) {
+  return String(row.description_raw || row.merchant_clean || row.merchant || 'Statement transaction')
+}
+
+function transactionAmountValue(row: TransactionRecord) {
+  return Number(String(row.amount || 0).replace(/[$,]/g, ''))
+}
+
+function transactionCategory(row: TransactionRecord) {
+  return String(row.category || 'Other')
+}
+
+function categoryChoices(currentCategory: string) {
+  return Array.from(new Set([currentCategory, ...editableTransactionCategories])).filter(Boolean)
 }
 
 function addMonths(month: string, offset: number) {
@@ -435,6 +499,104 @@ function InsightDialog({ snapshot, trend, onClose }: { snapshot: AnalyticsSnapsh
   )
 }
 
+function DetailedTransactionsDialog({
+  snapshot,
+  error,
+  onClose,
+  onCategoryChange,
+}: {
+  snapshot: AnalyticsSnapshot
+  error: string
+  onClose: () => void
+  onCategoryChange: (transactionId: string, category: string) => Promise<void>
+}) {
+  const [savingId, setSavingId] = useState('')
+  const editable = snapshot.source !== 'sample'
+  const monthGroups = useMemo(() => {
+    const sorted = snapshot.transactions
+      .slice()
+      .sort((left, right) => String(left.posted_at || '').localeCompare(String(right.posted_at || '')))
+    const groups = new Map<string, TransactionRecord[]>()
+    sorted.forEach((row) => {
+      const month = String(row.posted_at || '').slice(0, 7) || 'Unknown'
+      groups.set(month, [...(groups.get(month) || []), row])
+    })
+    return Array.from(groups.entries()).map(([month, rows]) => {
+      const income = rows.reduce((sum, row) => sum + Math.max(0, transactionAmountValue(row)), 0)
+      const spending = rows.reduce((sum, row) => sum + Math.abs(Math.min(0, transactionAmountValue(row))), 0)
+      return { month, rows, income, spending, net: income - spending }
+    })
+  }, [snapshot.transactions])
+
+  async function updateCategory(transactionId: string, category: string) {
+    setSavingId(transactionId)
+    try {
+      await onCategoryChange(transactionId, category)
+    } finally {
+      setSavingId('')
+    }
+  }
+
+  return (
+    <div className="review-backdrop" role="presentation">
+      <section className="review-dialog insight-dialog transaction-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="transaction-summary-title">
+        <div className="review-dialog-head">
+          <div>
+            <span className="overline">TRANSACTION SUMMARY</span>
+            <h2 id="transaction-summary-title">Detailed transactions by month</h2>
+          </div>
+          <button autoFocus onClick={onClose} aria-label="Close transaction summary"><X /></button>
+        </div>
+        <p className="dialog-intro">Review each parsed transaction, confirm money in or out, and correct categories that need a human touch.</p>
+        {!editable && <div className="auth-status">Process or save real statements to edit transaction categories.</div>}
+        {error && <div className="auth-error" role="alert">{error}</div>}
+        <div className="transaction-summary-scroll">
+          {monthGroups.length ? monthGroups.map((group) => (
+            <section className="monthly-transaction-group" key={group.month}>
+              <div className="month-summary-head">
+                <div>
+                  <h3>{group.month === 'Unknown' ? 'Unknown month' : formatMonthLabel(group.month)}</h3>
+                  <small>{group.rows.length} transactions in date order</small>
+                </div>
+                <div className="month-total-pills">
+                  <span className="positive">+ {formatMoney(group.income)}</span>
+                  <span className="negative">- {formatMoney(group.spending)}</span>
+                  <span className={group.net >= 0 ? 'positive' : 'negative'}>{group.net >= 0 ? '+' : '-'} {formatMoney(Math.abs(group.net))} net</span>
+                </div>
+              </div>
+              <div className="summary-transaction-list">
+                {group.rows.map((row, index) => {
+                  const amount = transactionAmountValue(row)
+                  const id = transactionRecordId(row, index)
+                  const flow = amount >= 0 ? '+' : '-'
+                  return (
+                    <div className="summary-transaction-row" key={`${id}-${index}`}>
+                      <span className={amount >= 0 ? 'flow-pill positive' : 'flow-pill negative'}>{flow}</span>
+                      <div className="summary-transaction-copy">
+                        <strong>{transactionMerchant(row)}</strong>
+                        <small>{String(row.posted_at || 'No date')} · {transactionDescription(row)}</small>
+                      </div>
+                      <select
+                        value={transactionCategory(row)}
+                        onChange={(event) => void updateCategory(id, event.target.value)}
+                        disabled={!editable || savingId === id}
+                        aria-label={`Category for ${transactionMerchant(row)}`}
+                      >
+                        {categoryChoices(transactionCategory(row)).map((category) => <option key={category} value={category}>{category}</option>)}
+                      </select>
+                      <strong className={amount >= 0 ? 'amount-positive' : 'amount-negative'}>{flow}{formatMoney(Math.abs(amount))}</strong>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )) : <div className="dialog-row verified-row"><span className="severity-dot low"/><div><strong>No transactions yet</strong><small>Upload statements to build a detailed monthly summary.</small></div><b>✓</b></div>}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 const typeWords = ['clear.', 'predictable.', 'simpler.']
 
 function Logo({ compact = false }: { compact?: boolean }) {
@@ -701,6 +863,8 @@ function Analytics() {
   const snapshot = useAnalyticsSnapshot()
   const [anomalyDialogOpen, setAnomalyDialogOpen] = useState(false)
   const [insightDialogOpen, setInsightDialogOpen] = useState(false)
+  const [transactionSummaryOpen, setTransactionSummaryOpen] = useState(false)
+  const [transactionEditError, setTransactionEditError] = useState('')
   const [chartMetric, setChartMetric] = useState<ChartMetric>('spending')
   const [chartWindow, setChartWindow] = useState(6)
   const [chartOffset, setChartOffset] = useState(0)
@@ -718,6 +882,25 @@ function Analytics() {
   function clearAllAnomalies() {
     saveReviewedAnomalies(anomalyKey, snapshot.analytics.anomaly_candidates.map((item) => item.transaction_id))
     setAnomalyReviewVersion((current) => current + 1)
+  }
+  async function handleTransactionCategoryChange(transactionId: string, category: string) {
+    setTransactionEditError('')
+    try {
+      if (snapshot.source === 'saved-account') {
+        await updateTransactionCategory(transactionId, category)
+        await refreshSavedAccountAnalytics()
+        return
+      }
+      if (snapshot.source === 'local-processing') {
+        const updated = updateCachedTransactionCategory(transactionId, category)
+        if (!updated) throw new Error('This local transaction could not be updated.')
+        return
+      }
+      throw new Error('Process statements before editing categories.')
+    } catch (caught) {
+      setTransactionEditError(caught instanceof Error ? caught.message : 'Category could not be updated.')
+      throw caught
+    }
   }
   if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
     return <>
@@ -748,9 +931,10 @@ function Analytics() {
     <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2><small className="chart-period-label">{chartPeriod}</small></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>{setChartWindow(Number(event.target.value));setChartOffset(0)}} aria-label="Chart period"><option value={3}>3 months</option><option value={6}>6 months</option><option value={12}>12 months</option></select><div className="chart-range-controls" aria-label="Move chart range"><button type="button" onClick={() => setChartOffset((currentOffset) => currentOffset - 1)} disabled={!canMoveBack}>Previous</button><button type="button" onClick={() => setChartOffset(0)} disabled={chartOffset === 0}>Latest</button><button type="button" onClick={() => setChartOffset((currentOffset) => currentOffset + 1)} disabled={!canMoveForward}>Next</button></div></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartOffset}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div><div className="category-scroll">{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</div></article></div>
     <div className="insight-ops-grid"><ForecastAccuracyPanel snapshot={snapshot}/><RecurringPanel snapshot={snapshot}/><BudgetTargetsPanel snapshot={snapshot} rows={rows}/></div>
     <article className="panel insight-patterns" id="anomalies"><div className="panel-head"><div><span className="overline">PATTERNS WE FOUND</span><h2>Financial signals, not just alerts</h2></div><span className="confidence"><Sparkles size={14}/> {sourceLabel(snapshot)}</span></div><div className="pattern-grid">{patterns.map(({ title, body, signal, icon: Icon, tone })=><div className="pattern-card" key={title}><span className={`pattern-icon ${tone}`}><Icon/></span><strong>{title}</strong><p>{body}</p><small>{signal}</small></div>)}</div></article>
-    <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions behind the insights</h2></div><Link to="/statements">Upload more <ArrowRight size={14}/></Link></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
+    <article className="panel transaction-panel"><div className="panel-head"><div><span className="overline">RECENT ACTIVITY</span><h2>Transactions behind the insights</h2></div><div className="panel-actions"><button type="button" onClick={() => setTransactionSummaryOpen(true)}>View detailed transactions summary</button><Link to="/statements">Upload more <ArrowRight size={14}/></Link></div></div><div className="transaction-list">{recent.map(t=><div className="transaction" key={`${t.merchant}-${t.date}-${t.amount}`}><span className={`merchant-icon ${t.tone}`}>{t.icon}</span><div><strong>{t.merchant}</strong><small>{t.category} · {t.date}</small></div><strong className={t.amount.startsWith('+')?'positive':''}>{t.amount}</strong></div>)}</div></article>
     {insightDialogOpen && <InsightDialog snapshot={snapshot} trend={trend} onClose={() => setInsightDialogOpen(false)} />}
     {anomalyDialogOpen && <AnomalyDialog items={openAnomalies} onClose={() => setAnomalyDialogOpen(false)} onClear={clearAnomaly} onClearAll={clearAllAnomalies} />}
+    {transactionSummaryOpen && <DetailedTransactionsDialog snapshot={snapshot} error={transactionEditError} onClose={() => setTransactionSummaryOpen(false)} onCategoryChange={handleTransactionCategoryChange} />}
   </>
 }
 
@@ -807,9 +991,14 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
   const [weeklyDigest, setWeeklyDigest] = useState(true)
   const [spendingAlerts, setSpendingAlerts] = useState(true)
   const [largeChargeAlerts, setLargeChargeAlerts] = useState(true)
+  const [deletionPassword, setDeletionPassword] = useState('')
+  const [deletionCode, setDeletionCode] = useState('')
+  const [deletionChallengeId, setDeletionChallengeId] = useState('')
+  const [localDeletionCode, setLocalDeletionCode] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const initials = (user?.full_name || user?.email || 'M').slice(0, 1).toUpperCase()
 
   useEffect(() => onSessionChange(() => {
@@ -851,12 +1040,64 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
     setMessage('Local cached insights were cleared. Upload statements again to rebuild them.')
   }
 
+  async function requestDataDeletionCode() {
+    if (!user) {
+      setError('Sign in before deleting account data.')
+      return
+    }
+    if (deletionPassword.length < 8) {
+      setError('Enter your password before requesting the deletion code.')
+      return
+    }
+    setDeleting(true)
+    setMessage('')
+    setError('')
+    try {
+      const response = await requestAccountDataDeletionCode(deletionPassword)
+      setDeletionChallengeId(response.deletion_challenge_id)
+      setLocalDeletionCode(response.verification_code)
+      setDeletionCode('')
+      setMessage('A verification code was sent to your email. Use the local test code below while running FinSim locally.')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not request a deletion code.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  async function confirmDataDeletion() {
+    if (!deletionChallengeId) {
+      setError('Request a deletion code first.')
+      return
+    }
+    if (!/^\d{6}$/.test(deletionCode.trim())) {
+      setError('Enter the six digit deletion code.')
+      return
+    }
+    setDeleting(true)
+    setMessage('')
+    setError('')
+    try {
+      await confirmAccountDataDeletion(deletionChallengeId, deletionCode)
+      clearCachedAnalytics()
+      setDeletionPassword('')
+      setDeletionCode('')
+      setDeletionChallengeId('')
+      setLocalDeletionCode('')
+      setMessage('Your saved statement data, transaction history and merchant rules were deleted. Your account is still active.')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not delete account data.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return <><PageHeader eyebrow="ACCOUNT" title="Settings."/><div className="settings-content settings-full">
     {message && <div className="auth-status">{message}</div>}
     {error && <div className="auth-error" role="alert">{error}</div>}
     <section className="panel settings-section"><div className="panel-head"><div><span className="overline">PROFILE</span><h2>Personal information</h2></div><button className="button button-secondary button-compact" onClick={() => setFullName(user?.full_name || '')}>Reset</button></div><div className="profile-row"><span className="profile-avatar">{initials}</span><div><strong>{user?.full_name || 'Local account'}</strong><small>{user?.email || 'Sign in to save account preferences'}</small></div><span className="confidence"><User size={14}/>{user ? 'Signed in' : 'Local preview'}</span></div><div className="form-grid"><label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name"/></label><label>Email address<input type="email" value={user?.email || ''} placeholder="you@example.com" autoComplete="email" disabled/></label><label>Home currency<select defaultValue="USD"><option>USD, US Dollar</option><option>CAD, Canadian Dollar</option></select></label><label>Time zone<select defaultValue="CT"><option value="CT">Central Time (US)</option><option>Eastern Time (US)</option><option>Pacific Time (US)</option></select></label></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save profile'}</button></section>
     <section className="panel settings-section"><div><span className="overline">PREFERENCES</span><h2>Alerts and appearance</h2></div><div className="setting-row"><div><strong>Monthly insights email</strong><small>A summary when a new report is ready.</small></div><button className={emails?'switch on':'switch'} onClick={()=>setEmails(!emails)} aria-label="Toggle monthly email"><i/></button></div><div className="setting-row"><div><strong>Weekly digest</strong><small>Helpful spending highlights without opening the app.</small></div><button className={weeklyDigest?'switch on':'switch'} onClick={()=>setWeeklyDigest(!weeklyDigest)} aria-label="Toggle weekly digest"><i/></button></div><div className="setting-row"><div><strong>Spending spike alerts</strong><small>Flag a category when it moves sharply from your normal pattern.</small></div><button className={spendingAlerts?'switch on':'switch'} onClick={()=>setSpendingAlerts(!spendingAlerts)} aria-label="Toggle spending alerts"><i/></button></div><div className="setting-row"><div><strong>Large charge alerts</strong><small>Surface unusually large transactions in Analytics.</small></div><button className={largeChargeAlerts?'switch on':'switch'} onClick={()=>setLargeChargeAlerts(!largeChargeAlerts)} aria-label="Toggle large charge alerts"><i/></button></div><div className="setting-row"><div><strong>Appearance</strong><small>Choose how FinSim looks for you.</small></div><div className="theme-toggle"><button className={theme==='light'?'active':''} onClick={()=>setTheme('light')}><Sun/>Light</button><button className={theme==='dark'?'active':''} onClick={()=>setTheme('dark')}><Moon/>Dark</button></div></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save preferences'}</button></section>
-    <section className="panel settings-section"><div><span className="overline">PRIVACY</span><h2>Account and data controls</h2></div><div className="setting-row"><div><strong>Email verification</strong><small>{user?.email_verified ? 'Your account email is verified.' : 'Verify your email before processing statements.'}</small></div><span className="confidence"><ShieldCheck size={14}/>{user?.email_verified ? 'Verified' : 'Needs verification'}</span></div><div className="setting-row"><div><strong>Statement uploads</strong><small>Add PDFs or reprocess corrected files from the upload workspace.</small></div><Link className="button button-primary button-compact" to="/statements">Open upload workspace</Link></div><div className="setting-row"><div><strong>Cached insights</strong><small>Clear the local analytics snapshot stored in this browser.</small></div><button className="button button-secondary button-compact" onClick={clearInsights}>Clear local cache</button></div><div className="setting-row"><div><strong>Session</strong><small>Sign out if this is a shared computer.</small></div><button className="button button-secondary button-compact" onClick={signOutFromSettings}>Sign out</button></div><p className="settings-note">FinSim does not ask for bank credentials. Public deployment should keep uploaded files in private storage with short retention and database access limited to the app service account.</p></section>
+    <section className="panel settings-section"><div><span className="overline">PRIVACY</span><h2>Account and data controls</h2></div><div className="setting-row"><div><strong>Email verification</strong><small>{user?.email_verified ? 'Your account email is verified.' : 'Verify your email before processing statements.'}</small></div><span className="confidence"><ShieldCheck size={14}/>{user?.email_verified ? 'Verified' : 'Needs verification'}</span></div><div className="setting-row"><div><strong>Statement uploads</strong><small>Add PDFs or reprocess corrected files from the upload workspace.</small></div><Link className="button button-primary button-compact" to="/statements">Open upload workspace</Link></div><div className="setting-row"><div><strong>Cached insights</strong><small>Clear the local analytics snapshot stored in this browser.</small></div><button className="button button-secondary button-compact" onClick={clearInsights}>Clear local cache</button></div><div className="setting-row"><div><strong>Session</strong><small>Sign out if this is a shared computer.</small></div><button className="button button-secondary button-compact" onClick={signOutFromSettings}>Sign out</button></div><div className="data-delete-panel"><div><span className="overline">DATA DELETION</span><h3>Delete saved statement data</h3><p>This removes uploaded statement results, parsed transactions and learned merchant rules from this account. Your sign-in account remains available.</p></div><div className="data-delete-form"><label>Password<input type="password" value={deletionPassword} onChange={(event)=>setDeletionPassword(event.target.value)} placeholder="Confirm password" minLength={8} maxLength={128} autoComplete="current-password" disabled={!user || deleting}/></label>{deletionChallengeId&&<label>Verification code<input value={deletionCode} onChange={(event)=>setDeletionCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} inputMode="numeric" autoComplete="one-time-code" disabled={deleting}/></label>}{localDeletionCode&&<small className="auth-code-hint">Local test code: <strong>{localDeletionCode}</strong></small>}<div className="data-delete-actions"><button className="button button-secondary button-compact" type="button" onClick={requestDataDeletionCode} disabled={!user || deleting}>{deleting ? 'Working...' : deletionChallengeId ? 'Send new code' : 'Send deletion code'}</button><button className="button button-danger button-compact" type="button" onClick={confirmDataDeletion} disabled={!user || !deletionChallengeId || deleting}>{deleting ? 'Deleting...' : 'Delete account data'}</button></div></div></div><p className="settings-note">FinSim does not ask for bank credentials. Statement files are used to build reports, and saved account data stays scoped to the signed-in user.</p></section>
   </div></>
 }
 

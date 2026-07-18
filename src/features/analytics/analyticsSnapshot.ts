@@ -193,6 +193,33 @@ export function clearCachedAnalytics() {
   window.dispatchEvent(new Event(updateEvent))
 }
 
+export function updateCachedTransactionCategory(transactionId: string, category: string) {
+  const stored = localStorage.getItem(storageKey)
+  if (!stored) return false
+  try {
+    const snapshot = JSON.parse(stored) as AnalyticsSnapshot
+    let changed = false
+    snapshot.transactions = snapshot.transactions.map((row) => {
+      if (String(row.transaction_id || '') !== transactionId) return row
+      changed = true
+      return {
+        ...row,
+        category,
+        category_source: 'user_edit',
+        category_confidence: '1.00',
+        needs_review: false,
+      }
+    })
+    if (!changed) return false
+    snapshot.updatedAt = new Date().toISOString()
+    localStorage.setItem(storageKey, JSON.stringify(snapshot))
+    window.dispatchEvent(new Event(updateEvent))
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function refreshSavedAccountAnalytics() {
   const snapshot = await loadAccountAnalyticsSnapshot()
   if (!snapshot) return null

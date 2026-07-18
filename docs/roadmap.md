@@ -1,4 +1,4 @@
-# Project work plan
+# Product roadmap
 
 FinSim is split into four workstreams so each part of the product has a clear owner and a clear contract with the rest of the system.
 
@@ -13,13 +13,13 @@ FinSim is split into four workstreams so each part of the product has a clear ow
 
 ## MVP milestone
 
-Goal: let a user create an account, verify it, upload at least three consecutive monthly statements, review uncertain merchants, and see dashboard analytics.
+Goal: let a user create an account, verify it, upload at least three monthly statements, review uncertain merchants, and see dashboard analytics.
 
 Acceptance criteria:
 
 - User account can be created, verified, signed in, and signed out.
 - New accounts start empty and guide the user to statement upload.
-- Upload rejects too few statements, duplicates, non PDFs, oversized files, and non consecutive months.
+- Upload rejects too few statements, duplicates, non PDFs, oversized files, and conflicting statement types.
 - Processing jobs are scoped to the signed in user.
 - Merchant review groups repeated descriptions together.
 - Remembered merchant choices apply to later jobs for the same user.

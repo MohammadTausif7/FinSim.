@@ -69,7 +69,7 @@ dist
 7. Deploy the frontend with `VITE_PROCESSING_API_URL` pointing to the backend URL.
 8. Confirm the backend `FINSIM_CORS_ORIGINS` exactly matches the frontend origin.
 9. Create a test account.
-10. Upload three synthetic or redacted consecutive monthly statements.
+10. Upload three synthetic or redacted monthly statements. Consecutive months are preferred for stronger trends.
 11. Complete review prompts.
 12. Confirm dashboard, analytics, and forecast pages show account data.
 

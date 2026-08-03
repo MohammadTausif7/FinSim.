@@ -278,6 +278,63 @@ class ProcessingApiTests(unittest.TestCase):
             "20.00",
         )
 
+        transaction_id = transactions[0]["transaction_id"]
+        corrected = self.client.patch(
+            f"/api/accounts/transactions/{transaction_id}/category",
+            json={"category": "Groceries"},
+            headers=self.headers,
+        )
+        self.assertEqual(corrected.status_code, 200)
+        self.assertEqual(corrected.json()["category"], "Groceries")
+        refreshed = self.client.get(
+            "/api/accounts/transactions",
+            headers=self.headers,
+        ).json()["items"]
+        changed = next(row for row in refreshed if row["transaction_id"] == transaction_id)
+        self.assertEqual(changed["category"], "Groceries")
+        self.assertEqual(changed["category_source"], "user_edit")
+
+        bad_category = self.client.patch(
+            f"/api/accounts/transactions/{transaction_id}/category",
+            json={"category": "Crypto Moonshots"},
+            headers=self.headers,
+        )
+        self.assertEqual(bad_category.status_code, 400)
+
+        blocked_deletion = self.client.post(
+            "/api/accounts/data-deletion/request-code",
+            json={"password": "wrongpass123"},
+            headers=self.headers,
+        )
+        self.assertEqual(blocked_deletion.status_code, 401)
+
+        deletion = self.client.post(
+            "/api/accounts/data-deletion/request-code",
+            json={"password": "securepass123"},
+            headers=self.headers,
+        )
+        self.assertEqual(deletion.status_code, 200)
+        deletion_payload = deletion.json()
+        self.assertEqual(len(deletion_payload["verification_code"]), 6)
+
+        deleted = self.client.post(
+            "/api/accounts/data-deletion/confirm",
+            json={
+                "deletion_challenge_id": deletion_payload["deletion_challenge_id"],
+                "code": deletion_payload["verification_code"],
+            },
+            headers=self.headers,
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(deleted.json()["deleted"])
+        self.assertEqual(deleted.json()["deleted_counts"]["transactions"], 3)
+        self.assertEqual(
+            self.client.get("/api/accounts/transactions", headers=self.headers).json()["items"],
+            [],
+        )
+        empty_analytics = self.client.get("/api/accounts/analytics", headers=self.headers).json()
+        self.assertEqual(empty_analytics["transaction_count"], 0)
+
     def test_feedback_must_cover_the_whole_merchant_group(self) -> None:
         job = self.client.post(
             "/api/processing-jobs",

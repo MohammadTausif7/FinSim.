@@ -25,6 +25,12 @@ export type SigninCodeResponse = {
   message: string
 }
 
+export type DataDeletionCodeResponse = {
+  deletion_challenge_id: string
+  verification_code: string
+  message: string
+}
+
 const apiBase = (import.meta.env.VITE_PROCESSING_API_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 const sessionKey = 'finsim-session-token'
 const userKey = 'finsim-account-user'
@@ -87,6 +93,36 @@ export async function verifySigninCode(loginChallengeId: string, code: string) {
   })
   saveSession(response.session_token, response.user)
   return response
+}
+
+export async function requestAccountDataDeletionCode(password: string) {
+  return request<DataDeletionCodeResponse>('/api/accounts/data-deletion/request-code', {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ password }),
+  })
+}
+
+export async function confirmAccountDataDeletion(deletionChallengeId: string, code: string) {
+  return request<{ deleted: boolean; message: string; deleted_counts: Record<string, number> }>(
+    '/api/accounts/data-deletion/confirm',
+    {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ deletion_challenge_id: deletionChallengeId, code }),
+    },
+  )
+}
+
+export async function updateTransactionCategory(transactionId: string, category: string) {
+  return request<{ transaction_id: string; category: string }>(
+    `/api/accounts/transactions/${encodeURIComponent(transactionId)}/category`,
+    {
+      method: 'PATCH',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ category }),
+    },
+  )
 }
 
 export function saveSession(token: string, user: AccountUser) {

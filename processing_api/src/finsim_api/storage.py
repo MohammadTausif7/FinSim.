@@ -140,6 +140,51 @@ class UserDataStore:
             ).fetchall()
         return [self._transaction_dict(row) for row in rows]
 
+    def update_transaction_category(self, user_id: str, transaction_id: str, category: str) -> bool:
+        """Save a user correction for a parsed transaction category."""
+
+        cleaned_transaction_id = transaction_id.strip()
+        cleaned_category = " ".join(category.strip().split())
+        if not cleaned_transaction_id or not cleaned_category:
+            return False
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE user_transactions
+                SET category = ?,
+                    category_source = 'user_edit',
+                    category_confidence = '1.00',
+                    needs_review = 0,
+                    saved_at = ?
+                WHERE user_id = ?
+                    AND transaction_id = ?
+                """,
+                (cleaned_category, _now(), user_id, cleaned_transaction_id),
+            )
+            return cursor.rowcount > 0
+
+    def clear_user_data(self, user_id: str) -> dict[str, int]:
+        """Delete statement-derived data while keeping the account itself."""
+
+        with self._connect() as connection:
+            deleted_transactions = connection.execute(
+                "DELETE FROM user_transactions WHERE user_id = ?",
+                (user_id,),
+            ).rowcount
+            deleted_batches = connection.execute(
+                "DELETE FROM statement_batches WHERE user_id = ?",
+                (user_id,),
+            ).rowcount
+            deleted_rules = connection.execute(
+                "DELETE FROM user_merchant_rules WHERE user_id = ?",
+                (user_id,),
+            ).rowcount
+        return {
+            "transactions": deleted_transactions,
+            "statement_batches": deleted_batches,
+            "merchant_rules": deleted_rules,
+        }
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.execute(

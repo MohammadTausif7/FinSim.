@@ -73,7 +73,7 @@ Every PR should include:
 - Any known limitations
 - Screenshots for visible UI changes
 
-At least one teammate should review before merging. Keep `main` protected and avoid direct pushes to `main`.
+At least one other contributor should review before merging. Keep `main` protected and avoid direct pushes to `main`.
 
 ## Data safety rules
 

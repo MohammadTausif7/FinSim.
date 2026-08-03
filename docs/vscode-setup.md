@@ -1,6 +1,6 @@
 # Running FinSim in VS Code
 
-This guide is for every project member setting up the integrated FinSim MVP.
+This guide is for anyone setting up the integrated FinSim MVP.
 
 ## Install required tools
 
@@ -98,9 +98,9 @@ http://localhost:5173
 2. Copy the local verification token.
 3. Verify the account.
 4. Go to `Statements`.
-5. Upload three consecutive monthly PDFs.
+5. Upload at least three monthly PDFs. Consecutive months are preferred for stronger trends.
 6. Review uncertain merchants if prompted.
-7. Open Dashboard, Analytics, and Forecast.
+7. Open Statements, Insights, and Forecast.
 8. Confirm the app says `Account data`.
 
 Use synthetic or redacted statements only.

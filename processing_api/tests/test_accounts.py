@@ -3,10 +3,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from finsim_api.accounts import AccountService
+from finsim_api.accounts import AccountError, AccountService
 from finsim_api.app import create_app
 from finsim_api.service import ProcessingService
 
@@ -32,7 +33,7 @@ class AccountApiTests(unittest.TestCase):
             "/api/accounts/signup",
             json={
                 "full_name": "Test User",
-                "email": "mohammad@example.com",
+                "email": "owner@example.com",
                 "password": "securepass123",
             },
         )
@@ -42,7 +43,7 @@ class AccountApiTests(unittest.TestCase):
 
         blocked = self.client.post(
             "/api/accounts/signin",
-            json={"email": "mohammad@example.com", "password": "securepass123"},
+            json={"email": "owner@example.com", "password": "securepass123"},
         )
         self.assertEqual(blocked.status_code, 401)
         self.assertIn("verified", blocked.json()["detail"])
@@ -53,7 +54,7 @@ class AccountApiTests(unittest.TestCase):
 
         challenge = self.client.post(
             "/api/accounts/signin/request-code",
-            json={"email": "mohammad@example.com", "password": "securepass123"},
+            json={"email": "owner@example.com", "password": "securepass123"},
         )
         self.assertEqual(challenge.status_code, 200)
         self.assertEqual(len(challenge.json()["verification_code"]), 6)
@@ -66,7 +67,7 @@ class AccountApiTests(unittest.TestCase):
 
         challenge = self.client.post(
             "/api/accounts/signin/request-code",
-            json={"email": "mohammad@example.com", "password": "securepass123"},
+            json={"email": "owner@example.com", "password": "securepass123"},
         ).json()
         signin = self.client.post(
             "/api/accounts/signin/verify-code",
@@ -80,7 +81,7 @@ class AccountApiTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {session}"},
         )
         self.assertEqual(current.status_code, 200)
-        self.assertEqual(current.json()["user"]["email"], "mohammad@example.com")
+        self.assertEqual(current.json()["user"]["email"], "owner@example.com")
 
     def test_duplicate_email_and_short_password_are_rejected(self) -> None:
         weak = self.client.post(
@@ -112,6 +113,15 @@ class AccountApiTests(unittest.TestCase):
         self.assertEqual(first.status_code, 201)
         self.assertEqual(duplicate.status_code, 400)
         self.assertIn("already exists", duplicate.json()["detail"])
+
+    def test_email_delivery_failure_does_not_leave_half_created_account(self) -> None:
+        account_service = AccountService(Path(self.folder.name) / "email-failure.db")
+        with patch.dict("os.environ", {"FINSIM_EMAIL_MODE": "smtp"}, clear=True):
+            with self.assertRaises(AccountError):
+                account_service.signup("Test User", "smtp@example.com", "securepass123")
+
+        retry = account_service.signup("Test User", "smtp@example.com", "securepass123")
+        self.assertIn("verification_token", retry)
 
     def test_settings_update_and_signout_require_a_session(self) -> None:
         signup = self.client.post(

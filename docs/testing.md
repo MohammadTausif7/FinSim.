@@ -40,12 +40,12 @@ Then test this flow in the browser:
 2. Create a new account from `Sign up`.
 3. Copy the local verification token.
 4. Verify the account.
-5. Confirm that the app shell shows account data instead of only sample data.
+5. Confirm that a new account starts empty and shows the statement upload workspace first.
 6. Go to `Statements`.
-7. Upload three consecutive monthly PDFs.
+7. Upload at least three monthly PDFs. Consecutive months are preferred for stronger trends.
 8. Confirm invalid files, duplicate files, non PDF files, or missing months are rejected.
 9. Complete the merchant review popup if it appears.
-10. Confirm the dashboard updates with saved account analytics.
+10. Confirm the insights page updates with saved account analytics.
 11. Open `Analytics` and check monthly summaries, category mix, trends, and anomaly candidates.
 12. Open `Forecast` and confirm a next month range is shown.
 13. Sign out and confirm account data is no longer available without signing in again.

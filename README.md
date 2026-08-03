@@ -123,8 +123,8 @@ http://localhost:5173
 8. Upload at least three monthly PDF statements. Consecutive months are preferred for stronger trends.
 9. Wait for parsing and categorization.
 10. Review uncertain merchants if the popup appears.
-11. Go to `Dashboard`, `Analytics`, and `Forecast`.
-12. Confirm the pages show account data instead of sample data.
+11. Go to `Insights` and `Forecast`.
+12. Confirm the pages show your uploaded account data and that a new account starts empty.
 
 Only use synthetic, demo, or safely redacted statements. Do not upload real financial documents to a public or shared demo.
 

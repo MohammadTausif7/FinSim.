@@ -22,7 +22,7 @@ The frontend lives in `src/` and uses React, TypeScript, Vite, React Router, and
 
 - Landing page and brand experience
 - Sign up, sign in, local email verification, and sign out screens
-- Dashboard, analytics, forecast, statements, and settings pages
+- Statements, insights, forecast, and settings pages
 - Statement upload progress UI
 - Merchant review popup for uncertain categories
 - Saved account analytics display

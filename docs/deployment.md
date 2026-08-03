@@ -18,9 +18,17 @@ Set these environment variables on the backend host:
 ```text
 FINSIM_ACCOUNT_DB=/var/data/finsim.db
 FINSIM_CORS_ORIGINS=https://your-frontend-domain.example
+FINSIM_EMAIL_MODE=smtp
+FINSIM_SMTP_HOST=smtp.example.com
+FINSIM_SMTP_PORT=587
+FINSIM_SMTP_USERNAME=your-smtp-username
+FINSIM_SMTP_PASSWORD=your-smtp-password
+FINSIM_EMAIL_FROM=FinSim <no-reply@your-domain.com>
+FINSIM_SMTP_USE_TLS=true
 ```
 
 Use a persistent disk or a managed database path for `FINSIM_ACCOUNT_DB`. If the host filesystem is ephemeral, accounts and saved transactions will disappear after redeploys.
+Use an email provider with SMTP support for verification, sign in, and deletion codes. Keep `FINSIM_EMAIL_MODE=local` only for local development.
 
 Install command:
 
@@ -69,9 +77,10 @@ dist
 7. Deploy the frontend with `VITE_PROCESSING_API_URL` pointing to the backend URL.
 8. Confirm the backend `FINSIM_CORS_ORIGINS` exactly matches the frontend origin.
 9. Create a test account.
-10. Upload three synthetic or redacted monthly statements. Consecutive months are preferred for stronger trends.
-11. Complete review prompts.
-12. Confirm dashboard, analytics, and forecast pages show account data.
+10. Confirm the verification code arrives by email.
+11. Upload three synthetic or redacted monthly statements. Consecutive months are preferred for stronger trends.
+12. Complete review prompts.
+13. Confirm insights and forecast pages show account data.
 
 ## Suggested first deployment architecture
 

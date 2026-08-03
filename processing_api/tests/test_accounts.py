@@ -3,10 +3,11 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from finsim_api.accounts import AccountService
+from finsim_api.accounts import AccountError, AccountService
 from finsim_api.app import create_app
 from finsim_api.service import ProcessingService
 
@@ -112,6 +113,15 @@ class AccountApiTests(unittest.TestCase):
         self.assertEqual(first.status_code, 201)
         self.assertEqual(duplicate.status_code, 400)
         self.assertIn("already exists", duplicate.json()["detail"])
+
+    def test_email_delivery_failure_does_not_leave_half_created_account(self) -> None:
+        account_service = AccountService(Path(self.folder.name) / "email-failure.db")
+        with patch.dict("os.environ", {"FINSIM_EMAIL_MODE": "smtp"}, clear=True):
+            with self.assertRaises(AccountError):
+                account_service.signup("Test User", "smtp@example.com", "securepass123")
+
+        retry = account_service.signup("Test User", "smtp@example.com", "securepass123")
+        self.assertIn("verification_token", retry)
 
     def test_settings_update_and_signout_require_a_session(self) -> None:
         signup = self.client.post(

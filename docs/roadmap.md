@@ -23,7 +23,7 @@ Acceptance criteria:
 - Processing jobs are scoped to the signed in user.
 - Merchant review groups repeated descriptions together.
 - Remembered merchant choices apply to later jobs for the same user.
-- Dashboard, analytics, and forecast pages update after processing.
+- Statements, insights, and forecast pages update after processing.
 - Docs explain setup, testing, security, deployment, and contribution workflow.
 
 ## Quality gates

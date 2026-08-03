@@ -100,7 +100,7 @@ http://localhost:5173
 4. Go to `Statements`.
 5. Upload at least three monthly PDFs. Consecutive months are preferred for stronger trends.
 6. Review uncertain merchants if prompted.
-7. Open Dashboard, Analytics, and Forecast.
+7. Open Statements, Insights, and Forecast.
 8. Confirm the app says `Account data`.
 
 Use synthetic or redacted statements only.

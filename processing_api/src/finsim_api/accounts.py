@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .email_delivery import EmailDeliveryError, send_account_email
+
 
 DEFAULT_DB_PATH = Path("processing_api/data/finsim_local.db")
 PASSWORD_ITERATIONS = 260_000
@@ -93,11 +95,23 @@ class AccountService:
         except sqlite3.IntegrityError as error:
             raise AccountError("An account already exists for this email address") from error
 
+        try:
+            email_result = self._send_email(
+                to_email=normalized_email,
+                subject="Verify your FinSim account",
+                body=f"Use this verification token to activate your FinSim account:\n\n{verification_token}",
+            )
+        except AccountError:
+            with self._connect() as connection:
+                connection.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+            raise
         user = self._get_user_by_id(user_id)
         return {
             "user": user.as_dict(),
-            "verification_token": verification_token,
-            "message": "Verification token generated for local development.",
+            "verification_token": verification_token if email_result.local_delivery else "",
+            "message": "Verification token generated for local development."
+            if email_result.local_delivery
+            else "Verification email sent.",
         }
 
     def verify_email(self, token: str) -> AccountUser:
@@ -169,10 +183,22 @@ class AccountService:
                     _now(),
                 ),
             )
+        try:
+            email_result = self._send_email(
+                to_email=normalized_email,
+                subject="Your FinSim sign in code",
+                body=f"Use this six digit code to sign in to FinSim:\n\n{code}\n\nThis code expires in {LOGIN_CODE_MINUTES} minutes.",
+            )
+        except AccountError:
+            with self._connect() as connection:
+                connection.execute("DELETE FROM login_challenges WHERE challenge_id = ?", (challenge_id,))
+            raise
         return {
             "login_challenge_id": challenge_id,
-            "verification_code": code,
-            "message": "Verification code sent to email.",
+            "verification_code": code if email_result.local_delivery else "",
+            "message": "Local verification code generated."
+            if email_result.local_delivery
+            else "Verification code sent to email.",
         }
 
     def verify_signin_code(self, challenge_id: str, code: str) -> dict[str, object]:
@@ -234,10 +260,22 @@ class AccountService:
                     _now(),
                 ),
             )
+        try:
+            email_result = self._send_email(
+                to_email=user.email,
+                subject="Confirm FinSim data deletion",
+                body=f"Use this six digit code to delete saved statement data from your FinSim account:\n\n{code}\n\nThis code expires in {LOGIN_CODE_MINUTES} minutes.",
+            )
+        except AccountError:
+            with self._connect() as connection:
+                connection.execute("DELETE FROM login_challenges WHERE challenge_id = ?", (challenge_id,))
+            raise
         return {
             "deletion_challenge_id": challenge_id,
-            "verification_code": code,
-            "message": "Verification code sent to email.",
+            "verification_code": code if email_result.local_delivery else "",
+            "message": "Local deletion code generated."
+            if email_result.local_delivery
+            else "Verification code sent to email.",
         }
 
     def verify_data_deletion_code(self, session_token: str, challenge_id: str, code: str) -> AccountUser:
@@ -418,6 +456,13 @@ class AccountService:
             monthly_email=bool(row["monthly_email"]),
             created_at=row["created_at"],
         )
+
+    @staticmethod
+    def _send_email(*, to_email: str, subject: str, body: str):
+        try:
+            return send_account_email(to_email=to_email, subject=subject, body=body)
+        except EmailDeliveryError as error:
+            raise AccountError(str(error)) from error
 
 
 def bearer_token(authorization: str | None) -> str:

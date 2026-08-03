@@ -158,6 +158,8 @@ def create_app(
     ) -> dict[str, object]:
         try:
             return accounts.request_data_deletion_code(bearer_token(authorization), body.password)
+        except AccountError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
         except AuthError as error:
             raise HTTPException(status_code=401, detail=str(error)) from error
 

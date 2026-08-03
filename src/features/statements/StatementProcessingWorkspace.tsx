@@ -20,7 +20,6 @@ import {
   minimumStatementCount,
   processingStages,
   sampleReviewItems,
-  sampleStatements,
   type JobState,
   type ReviewItem,
   type StatementFile,
@@ -37,6 +36,7 @@ import {
 } from './processingApi'
 import { refreshSavedAccountAnalytics, saveProcessingResult } from '../analytics/analyticsSnapshot'
 import { getSessionToken } from '../account/accountApi'
+import { notify } from '../ui/toastEvents'
 
 function toStatementFiles(files: File[], uploadModes: UploadMode[], detectedTypes: string[] = []) {
   return files.map((file, index): StatementFile => ({
@@ -89,7 +89,6 @@ export default function StatementProcessingWorkspace() {
   const [selectedFileDetectedTypes, setSelectedFileDetectedTypes] = useState<string[]>([])
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [uploadMode, setUploadMode] = useState<UploadMode>('multiple')
-  const [sampleMode, setSampleMode] = useState(false)
   const [jobId, setJobId] = useState<string | null>(null)
   const [jobState, setJobState] = useState<JobState>('idle')
   const [stageIndex, setStageIndex] = useState(0)
@@ -112,26 +111,16 @@ export default function StatementProcessingWorkspace() {
     jobIdRef.current = jobId
   }, [jobId])
 
+  useEffect(() => {
+    if (error) notify({ tone: 'error', title: 'Statement check failed', message: error })
+  }, [error])
+
   useEffect(() => () => {
     if (jobIdRef.current) void deleteProcessingJob(jobIdRef.current).catch(() => undefined)
   }, [])
 
   useEffect(() => {
-    if (jobState !== 'processing' || !sampleMode) return
-    const timer = window.setTimeout(() => {
-      if (stageIndex < processingStages.length - 1) {
-        setStageIndex((current) => current + 1)
-        return
-      }
-      setJobState('review')
-      setActiveReview(0)
-      setReviewOpen(true)
-    }, 720)
-    return () => window.clearTimeout(timer)
-  }, [jobState, sampleMode, stageIndex])
-
-  useEffect(() => {
-    if (jobState !== 'processing' || sampleMode || !jobId) return
+    if (jobState !== 'processing' || !jobId) return
     let cancelled = false
     let timer = 0
 
@@ -168,6 +157,7 @@ export default function StatementProcessingWorkspace() {
             internalTransfers: result.quality_report.internal_transfer_matches || 0,
           })
           setJobState('finalizing')
+          notify({ tone: 'success', title: 'Statements processed', message: 'Your categorized report is ready to review.' })
           return
         }
         timer = window.setTimeout(poll, 650)
@@ -183,7 +173,7 @@ export default function StatementProcessingWorkspace() {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [jobId, jobState, sampleMode])
+  }, [jobId, jobState])
 
   useEffect(() => {
     if (jobState !== 'finalizing') return
@@ -250,15 +240,16 @@ export default function StatementProcessingWorkspace() {
     setSelectedFileHashes(mergedHashes)
     setSelectedFileIntents(mergedIntents)
     setSelectedFileDetectedTypes(mergedDetectedTypes)
-    setSampleMode(false)
     setJobId(null)
     setError('')
     setJobState('idle')
+    notify({ tone: 'success', title: 'PDFs added', message: `${incoming.length} ${incoming.length === 1 ? 'statement was' : 'statements were'} added to this run.` })
     if (inputRef.current) inputRef.current.value = ''
   }
 
   function chooseUploadMode(mode: UploadMode) {
     setUploadMode(mode)
+    notify({ tone: 'info', title: 'Statement type selected', message: `${uploadModeLabel(mode)}. Choose the matching PDFs next.` })
     setUploadDialogOpen(false)
     window.setTimeout(() => inputRef.current?.click(), 0)
   }
@@ -276,8 +267,8 @@ export default function StatementProcessingWorkspace() {
     setSelectedFileDetectedTypes(nextDetectedTypes)
     setFiles(toStatementFiles(nextFiles, nextIntents, nextDetectedTypes))
     setJobId(null)
-    setSampleMode(false)
     setError('')
+    notify({ tone: 'info', title: 'Statement removed', message: 'The selected PDF was removed from this run.' })
   }
 
   async function startProcessing() {
@@ -285,7 +276,7 @@ export default function StatementProcessingWorkspace() {
       setError(`Add at least ${minimumStatementCount} monthly statements to build the first financial picture.`)
       return
     }
-    if (!sampleMode && !getSessionToken()) {
+    if (!getSessionToken()) {
       setError('Sign in before processing statements so results can be saved to your account.')
       return
     }
@@ -293,7 +284,7 @@ export default function StatementProcessingWorkspace() {
     setStageIndex(0)
     setError('')
     setJobState('processing')
-    if (sampleMode) return
+    notify({ tone: 'progress', title: 'Processing started', message: 'FinSim is reading, validating, and categorizing your statements.' })
     try {
       if (jobId) await deleteProcessingJob(jobId)
       const jobUploadMode = selectedFileIntents.every((intent) => intent === selectedFileIntents[0])
@@ -314,7 +305,7 @@ export default function StatementProcessingWorkspace() {
     if (!currentReview) return
     const currentId = currentReview.id
     const remainingAfterDecision = unresolved.length - 1
-    if (!sampleMode && jobId) {
+    if (jobId) {
       try {
         const job = await submitFeedback(jobId, [{
           transaction_ids: currentReview.transactionIds || [currentId],
@@ -348,6 +339,7 @@ export default function StatementProcessingWorkspace() {
     if (remainingAfterDecision === 0) {
       setReviewOpen(false)
       setJobState('finalizing')
+      notify({ tone: 'success', title: 'Merchant review complete', message: 'Your choices are being applied to the report.' })
     }
   }
 
@@ -359,27 +351,13 @@ export default function StatementProcessingWorkspace() {
     setSelectedFileHashes([])
     setSelectedFileIntents([])
     setSelectedFileDetectedTypes([])
-    setSampleMode(false)
     setJobId(null)
     setReviewItems(sampleReviewItems)
     setStageIndex(0)
     setError('')
     setReviewOpen(false)
     setJobState('idle')
-  }
-
-  function useSafeSamples() {
-    if (jobId) void deleteProcessingJob(jobId).catch(() => undefined)
-    setFiles(sampleStatements)
-    setSelectedFiles([])
-    setSelectedFileHashes([])
-    setSelectedFileIntents([])
-    setSelectedFileDetectedTypes([])
-    setUploadMode('multiple')
-    setSampleMode(true)
-    setJobId(null)
-    setError('')
-    setJobState('idle')
+    notify({ tone: 'info', title: 'Workspace reset', message: 'Selected statements and progress were cleared.' })
   }
 
   const progress = jobState === 'complete'
@@ -431,7 +409,6 @@ export default function StatementProcessingWorkspace() {
           <span>Three monthly periods minimum. You can mix checking, savings and credit card statements.</span>
           <div>
             <button className="button button-primary" onClick={() => setUploadDialogOpen(true)}>Choose PDFs</button>
-            <button className="button button-secondary" onClick={useSafeSamples}>Use safe sample files</button>
           </div>
         </div> : <div className="selected-statements">
           <div className="selected-summary"><strong>{files.length} statements selected</strong><span>{selectedUploadSummary}</span><button onClick={() => setUploadDialogOpen(true)}>Add more PDFs</button></div>
@@ -465,10 +442,10 @@ export default function StatementProcessingWorkspace() {
         <div className="processing-copy">
           <span className="overline">PROCESSING JOB</span>
           <h2>{jobState === 'idle' && 'Waiting for statements'}{jobState === 'processing' && processingStages[stageIndex].label}{jobState === 'review' && `${unresolved.length} ${unresolved.length === 1 ? 'transaction needs' : 'transactions need'} your help`}{jobState === 'finalizing' && 'Applying your choices'}{jobState === 'complete' && 'Your categorized data is ready'}</h2>
-          <p>{jobState === 'idle' && 'Choose files to start building your spending picture.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim found a few transactions where your input will improve the report.'}{jobState === 'finalizing' && 'Your report is being refreshed with the confirmed categories.'}{jobState === 'complete' && (sampleMode ? 'Every uncertain sample transaction has a confirmed category.' : 'Insights and forecast are ready to review.')}</p>
+          <p>{jobState === 'idle' && 'Choose files to start building your spending picture.'}{jobState === 'processing' && processingStages[stageIndex].detail}{jobState === 'review' && 'FinSim found a few transactions where your input will improve the report.'}{jobState === 'finalizing' && 'Your report is being refreshed with the confirmed categories.'}{jobState === 'complete' && 'Insights and forecast are ready to review.'}</p>
           {jobState === 'review' && <button className="button button-primary button-compact" onClick={() => setReviewOpen(true)}>Review merchants <ArrowRight /></button>}
-          {jobState === 'complete' && <div className="completion-summary"><span><Check /> {sampleMode ? 103 : completion.cleaned} cleaned</span><span><Check /> {sampleMode ? 3 : completion.confirmed} merchants reviewed</span><span><Sparkles /> {sampleMode ? 0 : completion.internalTransfers} account transfers matched</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
-          {jobState === 'complete' && !sampleMode && <a className="button button-primary button-compact analytics-ready-link" href="/analytics">View analytics <ArrowRight /></a>}
+          {jobState === 'complete' && <div className="completion-summary"><span><Check /> {completion.cleaned} cleaned</span><span><Check /> {completion.confirmed} merchants reviewed</span><span><Sparkles /> {completion.internalTransfers} account transfers matched</span><span><ShieldCheck /> {completion.warnings ? `${completion.warnings} quality warnings` : 'Quality checks passed'}</span></div>}
+          {jobState === 'complete' && <a className="button button-primary button-compact analytics-ready-link" href="/analytics">View analytics <ArrowRight /></a>}
         </div>
       </article>
     </section>
@@ -522,7 +499,7 @@ export default function StatementProcessingWorkspace() {
           </select>
         </fieldset>
         <label className="remember-choice"><input type="checkbox" checked={rememberMerchant} onChange={(event) => setRememberMerchant(event.target.checked)}/><span><strong>Remember this merchant</strong><small>Use the same category for future matching transactions.</small></span></label>
-        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>{sampleMode ? 'Your choice is stored only for this sample run.' : 'Your choice is saved with this account processing job.'}</span></div>
+        <div className="review-dialog-foot"><button onClick={() => setReviewOpen(false)}><ChevronLeft /> Review later</button><span>Your choice is saved with this account processing job.</span></div>
       </section>
     </div>}
   </>

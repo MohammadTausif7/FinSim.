@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import StatementProcessingWorkspace from './features/statements/StatementProcessingWorkspace'
+import { ToastViewport } from './features/ui/toast'
+import { notify } from './features/ui/toastEvents'
 import {
   confirmAccountDataDeletion,
   getStoredUser,
@@ -22,7 +24,6 @@ import {
   latestMonth,
   recentTransactions,
   refreshSavedAccountAnalytics,
-  sampleAnalyticsSnapshot,
   sourceLabel,
   topTrend,
   updateCachedTransactionCategory,
@@ -74,24 +75,22 @@ const chartMetricLabels: Record<ChartMetric, string> = {
 
 const anomalyReviewPrefix = 'finsim-reviewed-anomalies'
 const budgetTargetPrefix = 'finsim-budget-targets'
-
-// These records are intentionally fictional. They let us build and review the
-// interface without putting anyone's real financial history in the repository.
-const transactions = [
-  { merchant: 'Whole Foods Market', category: 'Groceries', date: 'Jun 18', amount: '-$84.26', icon: 'WF', tone: 'green' },
-  { merchant: 'Payroll deposit', category: 'Income', date: 'Jun 15', amount: '+$3,420.00', icon: 'PD', tone: 'blue' },
-  { merchant: 'Spotify', category: 'Subscriptions', date: 'Jun 14', amount: '-$11.99', icon: 'SP', tone: 'lime' },
-  { merchant: 'Blue Bottle Coffee', category: 'Dining', date: 'Jun 13', amount: '-$6.75', icon: 'BB', tone: 'orange' },
-  { merchant: 'ComEd', category: 'Utilities', date: 'Jun 12', amount: '-$92.40', icon: 'CE', tone: 'violet' },
-]
-
-const categories = [
-  { name: 'Housing', value: 38, amount: '$1,248', color: '#101418' },
-  { name: 'Food & dining', value: 24, amount: '$788', color: '#2f72ff' },
-  { name: 'Transport', value: 16, amount: '$526', color: '#8aaeff' },
-  { name: 'Shopping', value: 12, amount: '$394', color: '#b9ceff' },
-  { name: 'Other', value: 10, amount: '$328', color: '#e5ebf7' },
-]
+const emptyChartSnapshot: AnalyticsSnapshot = {
+  source: 'empty-account',
+  updatedAt: new Date().toISOString(),
+  transactionCount: 0,
+  reviewedMerchantCount: 0,
+  qualityWarningCount: 0,
+  transactions: [],
+  analytics: {
+    monthly_summaries: [],
+    category_breakdown: [],
+    spending_trends: [],
+    anomaly_candidates: [],
+    forecast: null,
+    warnings: [],
+  },
+}
 
 const categoryColors = ['#2563eb', '#7c3aed', '#059669', '#f97316', '#e11d48', '#0891b2', '#ca8a04', '#64748b']
 const merchantTones = ['green', 'blue', 'lime', 'orange', 'violet']
@@ -126,7 +125,7 @@ function categoryColor(index: number) {
 
 function monthCategoryRows(snapshot: AnalyticsSnapshot) {
   const rows = latestCategories(snapshot)
-  if (!rows.length) return categories
+  if (!rows.length) return []
   return rows.map((row, index) => ({
     name: row.category,
     value: Number(row.share_of_month),
@@ -137,7 +136,7 @@ function monthCategoryRows(snapshot: AnalyticsSnapshot) {
 
 function transactionPreview(snapshot: AnalyticsSnapshot) {
   const rows = recentTransactions(snapshot)
-  if (!rows.length) return snapshot.source === 'sample' ? transactions : []
+  if (!rows.length) return []
   return rows.map((row, index) => {
     const merchant = String(row.merchant_clean || row.description_raw || 'Transaction')
     const amount = Number(row.amount || 0)
@@ -189,11 +188,9 @@ function addMonths(month: string, offset: number) {
 }
 
 function monthlySeries(snapshot: AnalyticsSnapshot, metric: ChartMetric, limit: number, endOffset = 0): MonthlyChartPoint[] {
-  const summaries = snapshot.analytics.monthly_summaries.length
-    ? snapshot.analytics.monthly_summaries
-    : sampleAnalyticsSnapshot.analytics.monthly_summaries
+  const summaries = snapshot.analytics.monthly_summaries
   const byMonth = new Map(summaries.map((row) => [row.month, Number(row[metric] || 0)]))
-  const latest = summaries.at(-1)?.month || sampleAnalyticsSnapshot.analytics.monthly_summaries.at(-1)!.month
+  const latest = summaries.at(-1)?.month || new Date().toISOString().slice(0, 7)
   const endMonth = addMonths(latest, endOffset)
   return Array.from({ length: limit }, (_, index) => {
     const month = addMonths(endMonth, index - limit + 1)
@@ -277,9 +274,7 @@ function estimateSpendingValues(spending: number[]): ForecastEstimate {
 }
 
 function estimateNextMonth(snapshot: AnalyticsSnapshot) {
-  const summaries = snapshot.analytics.monthly_summaries.length
-    ? snapshot.analytics.monthly_summaries
-    : sampleAnalyticsSnapshot.analytics.monthly_summaries
+  const summaries = snapshot.analytics.monthly_summaries
   const spending = summaries.map((row) => Number(row.spending || 0))
   const targetMonth = nextMonth(summaries.at(-1)?.month || latestMonth(snapshot).month)
   return { targetMonth, ...estimateSpendingValues(spending) }
@@ -511,7 +506,7 @@ function DetailedTransactionsDialog({
   onCategoryChange: (transactionId: string, category: string) => Promise<void>
 }) {
   const [savingId, setSavingId] = useState('')
-  const editable = snapshot.source !== 'sample'
+  const editable = snapshot.source === 'saved-account' || snapshot.source === 'local-processing'
   const monthGroups = useMemo(() => {
     const sorted = snapshot.transactions
       .slice()
@@ -597,7 +592,7 @@ function DetailedTransactionsDialog({
   )
 }
 
-const typeWords = ['clear.', 'predictable.', 'simpler.']
+const typeWords = ['minutes.', 'context.', 'plain English.']
 
 function Logo({ compact = false }: { compact?: boolean }) {
   // The three bars are drawn in CSS, so the first version of the brand does not
@@ -627,7 +622,6 @@ function PublicNav({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme)
         <nav className={open ? 'public-links open' : 'public-links'} aria-label="Main navigation">
           <a href="/#how-it-works" onClick={() => setOpen(false)}>How it works</a>
           <a href="/#features" onClick={() => setOpen(false)}>Features</a>
-          <Link to="/statements" onClick={() => setOpen(false)}>Open app</Link>
         </nav>
         <div className="nav-actions">
           <ThemeButton theme={theme} setTheme={setTheme} />
@@ -641,45 +635,45 @@ function PublicNav({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme)
 }
 
 function HeroDemo() {
-  // This is a small product tour, not a second functioning dashboard. Keeping
-  // it as markup makes the landing page responsive and lets it adapt to the theme.
+  // This is a product walkthrough, not a second dashboard. It explains the
+  // flow without showing another person's financial numbers.
   return (
     <div className="hero-demo-wrap">
       <div className="demo-glow" />
       <div className="hero-demo">
         <div className="demo-topbar">
           <span className="demo-logo"><span className="logo-mark tiny"><i /><i /><i /></span> FinSim.</span>
-          <span className="demo-avatar">FS</span>
+          <span className="demo-status-dot">Private workspace</span>
         </div>
         <div className="demo-body">
           <aside className="demo-sidebar">
             <span className="active"><FileText /> Statements</span>
-            <span><BarChart3 /> Analytics</span>
+            <span><Zap /> Review</span>
+            <span><BarChart3 /> Report</span>
             <span><BrainCircuit /> Forecast</span>
-            <span><Settings /> Settings</span>
           </aside>
           <div className="demo-content">
-            <div className="demo-heading"><div><small>GOOD MORNING</small><strong>Your money, in focus.</strong></div><button><Upload size={13} /> Add statements</button></div>
-            <div className="demo-stats">
-              <div><small>NET CASH FLOW</small><strong>$1,284.60</strong><em><ArrowUpRight /> 12.4%</em></div>
-              <div><small>SPENT THIS MONTH</small><strong>$2,136.42</strong><em className="neutral">68% of plan</em></div>
-              <div><small>SMART SAVINGS</small><strong>$692.18</strong><em><ArrowUpRight /> $84 ahead</em></div>
+            <div className="demo-heading"><div><small>START HERE</small><strong>Build your first report.</strong></div><button><Upload size={13} /> Add PDFs</button></div>
+            <div className="demo-flow">
+              <div><span>1</span><strong>Upload statements</strong><small>Checking, savings, and credit card PDFs can be added together.</small></div>
+              <div><span>2</span><strong>Confirm unclear merchants</strong><small>FinSim asks only when a category needs your input.</small></div>
+              <div><span>3</span><strong>Open your report</strong><small>See totals, trends, categories, anomalies, and next month range.</small></div>
             </div>
-            <div className="demo-chart">
-              <div className="demo-chart-head"><div><small>SPENDING PULSE</small><strong>$2,136 <span>in June</span></strong></div><span>6 months⌄</span></div>
-              <svg viewBox="0 0 620 180" role="img" aria-label="Spending trend chart">
-                <defs><linearGradient id="heroFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#3979ff" stopOpacity=".25"/><stop offset="1" stopColor="#3979ff" stopOpacity="0"/></linearGradient></defs>
-                <path className="gridline" d="M0 35H620M0 85H620M0 135H620" />
-                <path className="area" d="M0 140 C40 132,58 96,103 106 S175 136,210 92 S274 65,316 88 S378 120,420 76 S486 50,518 68 S570 43,620 34 L620 180 L0 180Z" />
-                <path className="line" d="M0 140 C40 132,58 96,103 106 S175 136,210 92 S274 65,316 88 S378 120,420 76 S486 50,518 68 S570 43,620 34" />
-              </svg>
-              <div className="demo-months"><span>JAN</span><span>FEB</span><span>MAR</span><span>APR</span><span>MAY</span><span>JUN</span></div>
+            <div className="demo-report-card">
+              <div className="demo-report-head"><div><small>AFTER PROCESSING</small><strong>Your report is ready</strong></div><span>Verified</span></div>
+              <div className="demo-report-grid">
+                <span><Check /> Monthly totals</span>
+                <span><Check /> Category mix</span>
+                <span><Check /> Transaction summary</span>
+                <span><Check /> Next month forecast</span>
+              </div>
+              <div className="demo-progress"><i /><i /><i /></div>
             </div>
           </div>
         </div>
       </div>
-      <div className="floating-card insight-float"><span><Sparkles size={15} /></span><div><small>FINSIM INSIGHT</small><strong>You spent 18% less on dining</strong></div></div>
-      <div className="floating-card secure-float"><ShieldCheck size={18} /><div><strong>3 statements ready</strong><small>Secure workflow</small></div></div>
+      <div className="floating-card insight-float"><span><Sparkles size={15} /></span><div><small>SMART REVIEW</small><strong>Repeated merchants are grouped once</strong></div></div>
+      <div className="floating-card secure-float"><ShieldCheck size={18} /><div><strong>No bank login needed</strong><small>PDF upload workflow</small></div></div>
     </div>
   )
 }
@@ -699,41 +693,53 @@ function Landing({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) =
       <PublicNav theme={theme} setTheme={setTheme} />
       <main>
         <section className="hero section-pad">
-          <div className="eyebrow"><span><Sparkles size={13} /></span> Your financial assistant</div>
-          <h1>Finance, made <span className="typeword" key={typeWords[word]}>{typeWords[word]}</span></h1>
-          <p className="hero-copy">Upload your bank statements. FinSim turns the noise into a clear picture of your spending and helps you plan what comes next.</p>
+          <div className="hero-orb hero-orb-one" />
+          <div className="hero-orb hero-orb-two" />
+          <div className="eyebrow"><span><Sparkles size={13} /></span> Statement insights without bank logins</div>
+          <h1 className="hero-title">
+            <span>Upload statements.</span>
+            <span>Understand your money in</span>
+            <span className="typeword" key={typeWords[word]}>{typeWords[word]}</span>
+          </h1>
+          <p className="hero-copy">FinSim reads your monthly PDFs, extracts transactions, asks you to review unclear merchants, then builds spending insights, anomaly checks, and a next month forecast.</p>
           <div className="hero-actions">
-            <Link to="/signup" className="button button-primary">Start simplifying <ArrowRight size={17} /></Link>
+            <Link to="/signup" className="button button-primary">Create my workspace <ArrowRight size={17} /></Link>
+            <Link to="/signin" className="button button-secondary">I already have an account</Link>
           </div>
-          <div className="trust-note"><span><Check size={12} /></span> No credit card <span><Check size={12} /></span> Secure upload flow <span><Check size={12} /></span> No bank credentials</div>
+          <div className="trust-note"><span><Check size={12} /></span> Start with 3 monthly PDFs <span><Check size={12} /></span> Multiple accounts supported <span><Check size={12} /></span> No bank credentials</div>
+          <div className="hero-quick-grid">
+            <article><FileText /><strong>Upload PDFs</strong><small>Checking, savings, and credit card statements.</small></article>
+            <article><Zap /><strong>Review only what is unclear</strong><small>Repeated merchants are grouped together.</small></article>
+            <article><BarChart3 /><strong>Get the money story</strong><small>Transactions, categories, trends, and forecast.</small></article>
+          </div>
           <HeroDemo />
         </section>
 
-        <section className="trust-strip"><p>Built for a clear statement to insight workflow</p><div><strong>RESPONSIVE DESIGN</strong><strong>LIGHT AND DARK THEMES</strong><strong>LIVE ANALYTICS</strong><strong>FORECAST CONTROLS</strong></div></section>
+        <section className="trust-strip"><p>Designed for the full statement workflow</p><div><strong>PDF VALIDATION</strong><strong>PRIVATE ACCOUNTS</strong><strong>CATEGORY REVIEW</strong><strong>FORECAST CONTROLS</strong></div></section>
 
         <section className="how section-pad" id="how-it-works">
-          <div className="section-heading"><span className="overline">FROM PDF TO PERSPECTIVE</span><h2>Your finances, understood<br/>in three quiet steps.</h2><p>FinSim does the tedious work so you can spend your energy on better decisions.</p></div>
+          <div className="section-heading"><span className="overline">FROM PDF TO PERSPECTIVE</span><h2>A clear path from upload<br/>to usable insight.</h2><p>FinSim is built for people who want the answer, not another spreadsheet to maintain.</p></div>
           <div className="steps-grid">
             <article><span className="step-number">01</span><div className="step-icon"><Upload /></div><h3>Drop in your statements</h3><p>Start with at least three monthly PDF statements. Consecutive months are preferred for stronger trends.</p><span className="micro-chip"><FileText size={13} /> statement.pdf <Check size={13} /></span></article>
             <article><span className="step-number">02</span><div className="step-icon"><Zap /></div><h3>We make sense of it</h3><p>Transactions are cleaned, matched and categorized into a reliable financial timeline.</p><div className="category-mini"><span>COFFEE SHOP <i>Dining</i></span><span>AMZN MKTPLACE <i>Shopping</i></span></div></article>
-            <article><span className="step-number">03</span><div className="step-icon"><TrendingUp /></div><h3>See what comes next</h3><p>Explore trends, surface unusual activity, and model next month's likely spending.</p><div className="forecast-mini"><span>Next month</span><strong>$2,340 to $2,680</strong><svg viewBox="0 0 200 34"><path d="M0 28 C35 25,42 6,76 15 S110 30,140 13 S176 15,200 3" /></svg></div></article>
+            <article><span className="step-number">03</span><div className="step-icon"><TrendingUp /></div><h3>See what comes next</h3><p>Explore trends, surface unusual activity, and model next month's likely spending.</p><div className="forecast-mini"><span>Next month forecast</span><strong>Range appears after upload</strong><svg viewBox="0 0 200 34"><path d="M0 28 C35 25,42 6,76 15 S110 30,140 13 S176 15,200 3" /></svg></div></article>
           </div>
         </section>
 
         <section className="features section-pad" id="features">
           <div className="section-heading left"><span className="overline">CLARITY THAT COMPOUNDS</span><h2>Less spreadsheet.<br/>More headspace.</h2></div>
           <div className="feature-bento">
-            <article className="feature-large"><div className="feature-copy"><span className="feature-icon"><Gauge /></span><h3>One calm financial home</h3><p>Cash flow, spending, savings and recent activity are organized into an insights page you can actually read.</p><Link to="/analytics">Explore insights <ArrowRight size={15} /></Link></div><div className="bento-ui"><div className="bento-balance"><small>AVAILABLE BALANCE</small><strong>$6,482.19</strong><span>Across 2 accounts</span></div><div className="ring"><div><strong>68%</strong><small>of monthly plan</small></div></div></div></article>
-            <article><span className="feature-icon blue"><BrainCircuit /></span><h3>A forecast you can shape</h3><p>Adjust rent, groceries or goals and immediately see the range of likely outcomes.</p><div className="slider-mock"><span><i>Dining</i><b>$340</b></span><input type="range" value="62" readOnly /><span><i>Expected range</i><b>$2.3k to $2.7k</b></span></div></article>
+            <article className="feature-large"><div className="feature-copy"><span className="feature-icon"><Gauge /></span><h3>One calm financial home</h3><p>Cash flow, spending, categories and recent activity are organized into an insights page you can actually read.</p><Link to="/signup">Create workspace <ArrowRight size={15} /></Link></div><div className="bento-ui"><div className="bento-balance"><small>WORKSPACE STATUS</small><strong>Upload ready</strong><span>Reports unlock after processing</span></div><div className="ring"><div><strong>3+</strong><small>monthly PDFs</small></div></div></div></article>
+            <article><span className="feature-icon blue"><BrainCircuit /></span><h3>A forecast you can shape</h3><p>Adjust rent, groceries or goals and immediately see the range of likely outcomes.</p><div className="slider-mock"><span><i>Dining</i><b>Adjustable</b></span><input type="range" value="62" readOnly aria-label="Forecast scenario preview" /><span><i>Expected range</i><b>Calculated after upload</b></span></div></article>
             <article><span className="feature-icon amber"><Bell /></span><h3>Quietly watching for the unusual</h3><p>Duplicate charges, spending spikes and surprising subscriptions rise to the surface.</p><div className="alert-mock"><span>!</span><div><strong>Unusual charge</strong><small>$129.00 · Streaming</small></div><ChevronRight /></div></article>
             <article className="security-card" id="security"><span className="feature-icon green"><ShieldCheck /></span><h3>Privacy is part of the workflow</h3><p>FinSim uses account-scoped jobs, PDF checks, short-lived processing files and no bank credential access.</p><div className="security-points"><span><Check /> Authenticated uploads</span><span><Check /> No bank credentials</span><span><Check /> Private local data</span></div></article>
             <article className="statement-card"><span className="feature-icon violet"><ReceiptText /></span><h3>Flexible statement support</h3><p>Built for messy descriptions, changing formats and more than one bank.</p><div className="files-stack"><span>APR <FileCheck2 /></span><span>MAY <FileCheck2 /></span><span>JUN <FileCheck2 /></span></div></article>
           </div>
         </section>
 
-        <section className="cta section-pad"><div className="cta-card"><span className="cta-orb"/><span className="overline">YOUR NEXT MONTH STARTS HERE</span><h2>Money feels lighter<br/>when it makes sense.</h2><p>Bring three statements. We'll bring the perspective.</p><Link className="button button-white" to="/signup">Build my financial picture <ArrowRight /></Link></div></section>
+        <section className="cta section-pad"><div className="cta-card"><span className="cta-orb"/><span className="overline">YOUR NEXT MONTH STARTS HERE</span><h2>Money feels lighter<br/>when it makes sense.</h2><p>Bring three statements. FinSim will help build the perspective.</p><Link className="button button-white" to="/signup">Build my financial picture <ArrowRight /></Link></div></section>
       </main>
-      <footer><div className="footer-main"><Logo /><p>Finance, simplified.<br/>Decisions, clarified.</p><div><strong>Product</strong><a href="/#features">Features</a><Link to="/analytics">Insights</Link><Link to="/forecast">Forecast</Link></div><div><strong>Workflow</strong><a href="/#how-it-works">How it works</a><Link to="/statements">Upload statements</Link></div></div><div className="footer-bottom"><span>© 2026 FinSim.</span><span>Statement analytics workspace</span></div></footer>
+      <footer><div className="footer-main"><Logo /><p>Finance, simplified.<br/>Decisions, clarified.</p><div><strong>Product</strong><a href="/#features">Features</a><Link to="/signup">Create account</Link></div><div><strong>Workflow</strong><a href="/#how-it-works">How it works</a><Link to="/signup">Upload after sign in</Link></div></div><div className="footer-bottom"><span>© 2026 FinSim.</span><span>Statement analytics workspace</span></div></footer>
     </div>
   )
 }
@@ -755,6 +761,7 @@ function AppShell({ children, theme, setTheme }: { children: ReactNode; theme: T
     { to: '/forecast', label: 'Forecast', icon: BrainCircuit },
   ]
   useEffect(() => onSessionChange(() => setUser(getStoredUser())), [])
+  if (!user) return <Navigate to="/signin" replace state={{ from: location.pathname }} />
   async function handleSignout() {
     await signout().catch(() => undefined)
     navigate('/signin')
@@ -769,12 +776,12 @@ function AppShell({ children, theme, setTheme }: { children: ReactNode; theme: T
           <span className="nav-label second">ACCOUNT</span>
           <NavLink to="/settings" onClick={() => setMobileOpen(false)}><Settings size={18} />Settings</NavLink>
         </nav>
-        <div className="side-profile"><span>{initials}</span><div><strong>{user?.full_name || 'Guest'}</strong><small>{user ? 'Personal workspace' : 'Sample workspace'}</small></div>{user ? <button className="profile-action" onClick={handleSignout} type="button">Sign out</button> : <MoreHorizontal />}</div>
+        <div className="side-profile"><span>{initials}</span><div><strong>{user?.full_name || 'Guest'}</strong><small>{user ? 'Personal workspace' : 'Sign in to save reports'}</small></div>{user ? <button className="profile-action" onClick={handleSignout} type="button">Sign out</button> : <MoreHorizontal />}</div>
       </aside>
       <div className="app-main">
         <header className="app-topbar">
           <button className="mobile-menu app-menu" onClick={() => setMobileOpen(!mobileOpen)}><Menu /></button>
-          <div className="breadcrumbs"><span>FinSim</span><ChevronRight size={13}/><strong>{location.pathname.slice(1) || 'Statements'}</strong><span className="demo-badge">{user ? 'Account workspace' : 'Example data'}</span></div>
+          <div className="breadcrumbs"><span>FinSim</span><ChevronRight size={13}/><strong>{location.pathname.slice(1) || 'Statements'}</strong><span className="demo-badge">{user ? 'Account workspace' : 'Sign in required'}</span></div>
           <div className="top-actions"><ThemeButton theme={theme} setTheme={setTheme}/><Link className="avatar" to="/settings" aria-label="Open settings">{initials}</Link></div>
         </header>
         <main className="page-content">{children}</main>
@@ -794,7 +801,7 @@ function MetricCard({ label, value, detail, trend, down, icon: Icon, to, onClick
 }
 
 function SpendingChart({ forecast = false, series, metric = 'spending' }: { forecast?: boolean; series?: MonthlyChartPoint[]; metric?: ChartMetric }) {
-  const data = series?.length ? series : monthlySeries(sampleAnalyticsSnapshot, metric, 6)
+  const data = series?.length ? series : monthlySeries(emptyChartSnapshot, metric, 6)
   const lastDataIndex = Math.max(0, data.reduce((last, point, index) => (point.value === null ? last : index), -1))
   const [activeIndex, setActiveIndex] = useState(lastDataIndex)
   const width = 780
@@ -855,7 +862,7 @@ function BudgetTargetsPanel({ snapshot, rows }: { snapshot: AnalyticsSnapshot; r
   return <article className="panel budget-panel"><div className="panel-head"><div><span className="overline">BUDGET TARGETS</span><h2>Set category limits</h2></div><span className="confidence"><Target size={14}/> editable</span></div><div className="budget-list panel-scroll">{rows.map((row)=>{const spent=Number(row.amount.replace(/[$,]/g,''));const target=targetFor(row);const percent=target ? Math.min(140,(spent/target)*100) : 0;return <div className="budget-row" key={row.name}><div><span><i style={{background:row.color}}/>{row.name}</span><label><b>$</b><input type="number" min={0} max={999999} step={1} inputMode="numeric" value={target} onChange={(event)=>updateTarget(row.name, Number(event.target.value))} onBlur={(event)=>updateTarget(row.name, Number(event.target.value))} aria-label={`${row.name} monthly budget target`}/></label></div><div className="progress"><i style={{width:`${Math.min(100,percent)}%`,background:percent>100?'#e11d48':row.color}}/></div><small>{formatMoney(spent)} spent of {formatMoney(target)} {percent>100?'· over target':'· on watch'}</small></div>})}</div></article>
 }
 
-function Dashboard() {
+function WorkspaceRedirect() {
   return <Navigate to="/statements" replace />
 }
 
@@ -902,7 +909,7 @@ function Analytics() {
       throw caught
     }
   }
-  if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
+  if (!hasFinancialData(snapshot)) {
     return <>
       <PageHeader eyebrow="DETAILED ANALYSIS" title="No analysis yet."/>
       <EmptyWorkspace title="Your analytics will appear after statement processing." message="Upload at least three monthly statements. Consecutive months are preferred, and once processing finishes this page will show comparisons, category mix, trends and anomaly candidates." />
@@ -911,7 +918,7 @@ function Analytics() {
   const current = latestMonth(snapshot)
   const rows = monthCategoryRows(snapshot)
   const trend = topTrend(snapshot)
-  const largest = rows[0] || categories[0]
+  const largest = rows[0] || { name: 'No category yet', value: 0, amount: formatMoney(0), color: categoryColor(0) }
   const spendTransactionCount = latestCategories(snapshot).reduce((sum, row) => sum + Number(row.transaction_count || 0), 0)
   const averagePurchase = Number(current.spending) / Math.max(1, spendTransactionCount || current.transaction_count)
   const anomalyCount = openAnomalies.length
@@ -926,7 +933,7 @@ function Analytics() {
   const canMoveForward = chartOffset < 3
   const chartPeriod = chartStartMonth && chartEndMonth ? `${formatMonthLabel(chartStartMonth)} to ${formatMonthLabel(chartEndMonth)}` : 'No period selected'
   return <><PageHeader eyebrow="DETAILED ANALYSIS" title="The story behind your spending."><button className="button button-secondary button-compact analysis-period-badge">{analysisPeriodLabel(snapshot)} <ChevronRight size={15}/></button></PageHeader>
-    <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : snapshot.source === 'local-processing' ? 'This insight is built from your latest local statement processing run.' : 'This is sample data until you process real statements.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
+    <div className="analytics-callout"><span><Sparkles/></span><div><strong>{trend ? `${trend.category} moved ${formatMoney(trend.change_amount)} ${trend.direction === 'up' ? 'up' : trend.direction === 'down' ? 'down' : 'flat'}.` : 'Your latest analytics are ready.'}</strong><p>{snapshot.source === 'saved-account' ? 'This insight is built from saved transactions in your FinSim account.' : 'This insight is built from your latest local statement processing run.'}</p></div><button type="button" onClick={() => setInsightDialogOpen(true)}>Explore insight <ArrowRight/></button></div>
     <div className="metric-grid three"><MetricCard label="AVG PURCHASE" value={formatMoney(averagePurchase)} detail="average outgoing transaction" icon={Gauge}/><MetricCard label="LARGEST CATEGORY" value={largest.amount} detail={`${largest.name} · ${largest.value.toFixed(0)}%`} icon={Landmark}/><MetricCard label="ANOMALIES" value={anomalyCount ? String(anomalyCount) : '0'} detail={anomalyCount ? 'open transaction review' : 'No anomalies, all verified'} icon={ReceiptText} onClick={() => setAnomalyDialogOpen(true)}/></div>
     <div className="dashboard-grid analytics-grid"><article className="panel chart-panel"><div className="panel-head chart-panel-head"><div><span className="overline">MONTHLY COMPARISON</span><h2>{chartMetricLabels[chartMetric]} trajectory</h2><small className="chart-period-label">{chartPeriod}</small></div><div className="chart-controls"><div className="segmented-control" aria-label="Chart metric">{(Object.keys(chartMetricLabels) as ChartMetric[]).map((metric)=><button key={metric} type="button" className={metric === chartMetric ? 'active' : ''} onClick={() => setChartMetric(metric)}>{chartMetricLabels[metric]}</button>)}</div><select value={chartWindow} onChange={(event)=>{setChartWindow(Number(event.target.value));setChartOffset(0)}} aria-label="Chart period"><option value={3}>3 months</option><option value={6}>6 months</option><option value={12}>12 months</option></select><div className="chart-range-controls" aria-label="Move chart range"><button type="button" onClick={() => setChartOffset((currentOffset) => currentOffset - 1)} disabled={!canMoveBack}>Previous</button><button type="button" onClick={() => setChartOffset(0)} disabled={chartOffset === 0}>Latest</button><button type="button" onClick={() => setChartOffset((currentOffset) => currentOffset + 1)} disabled={!canMoveForward}>Next</button></div></div></div><SpendingChart key={`${chartMetric}-${chartWindow}-${chartOffset}-${chartData.map((point) => point.month).join('-')}`} series={chartData} metric={chartMetric}/></article><article className="panel category-detail"><div className="panel-head"><div><span className="overline">CATEGORY MIX</span><h2>{formatMoney(current.spending)} total</h2></div><span className="category-count">{rows.length} groups</span></div><div className="category-scroll">{rows.map(c=><div className="category-row" key={c.name}><div><span><i style={{background:c.color}}/>{c.name}</span><strong>{c.amount}</strong></div><div className="progress"><i style={{width:`${Math.max(2, Math.min(100, c.value))}%`,background:c.color}}/></div><small>{c.value.toFixed(1)}%</small></div>)}</div></article></div>
     <div className="insight-ops-grid"><ForecastAccuracyPanel snapshot={snapshot}/><RecurringPanel snapshot={snapshot}/><BudgetTargetsPanel snapshot={snapshot} rows={rows}/></div>
@@ -948,7 +955,7 @@ function Forecast() {
   const [dining, setDining] = useState(Math.round(baselineDining || 340))
   const [shopping, setShopping] = useState(Math.round(baselineShopping || 390))
   const [income, setIncome] = useState(Math.max(3000, Math.round(Number(current.income) || 4200)))
-  if (!hasFinancialData(snapshot) && snapshot.source !== 'sample') {
+  if (!hasFinancialData(snapshot)) {
     return <>
       <PageHeader eyebrow="FORECAST" title="Forecast needs history."/>
       <EmptyWorkspace title="Upload statements to unlock next month ranges." message="FinSim needs at least three monthly statements before it can build a useful forecast and scenario simulator. Consecutive months improve the result." />
@@ -968,7 +975,7 @@ function Forecast() {
   const shoppingMax = Math.max(1200, shopping, Math.ceil(baselineShopping * 2))
   return <><PageHeader eyebrow={`${formatMonthLabel(forecast.targetMonth).toUpperCase()} OUTLOOK`} title="Shape your next month."><span className="confidence"><Sparkles size={14}/> {forecast.confidence} confidence</span></PageHeader>
     <div className="forecast-hero panel"><div><span className="overline">NEXT MONTH SPENDING RANGE</span><strong>{formatMoney(adjustedLow)} to {formatMoney(adjustedHigh)}</strong><p>Most likely after your assumptions: <b>{formatMoney(predicted)}</b></p></div><div className="forecast-health"><span>{projectedSavingsRate}%</span><div><strong>Projected savings rate</strong><small>{savings >= 0 ? `${formatMoney(savings)} left after spending` : `${formatMoney(Math.abs(savings))} above expected income`}</small></div></div></div>
-    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust next month</h2></div><button onClick={()=>{setDining(Math.round(baselineDining || 340));setShopping(Math.round(baselineShopping || 390));setIncome(Math.max(3000, Math.round(Number(current.income) || 4200)))}}>Reset</button></div><p>Use the sliders or type exact dollar values to see how income and flexible spending affect only the next month estimate.</p><ForecastSlider label="Expected income" value={income} min={0} max={incomeMax} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={0} max={diningMax} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={0} max={shoppingMax} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : savings >= 0 ? 'This plan stays above water.' : 'This plan would run above income.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Likely drivers</h2></div></div>{forecastRows.slice(0,5).map((row)=><div className="forecast-row" key={row.name}><div><span>{row.name}</span><strong>{row.amount}</strong></div><div><i style={{width:`${Math.min(100, row.value)}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>{forecast.method}</strong><p>{snapshot.source === 'sample' ? 'Upload statements to replace this example with your own next month estimate.' : 'This next month forecast uses your monthly spending history, recent trend and recent volatility.'}</p></div></div></article></div>
+    <div className="forecast-layout"><article className="panel simulator"><div className="panel-head"><div><span className="overline">SCENARIO SIMULATOR</span><h2>Adjust next month</h2></div><button onClick={()=>{setDining(Math.round(baselineDining || 340));setShopping(Math.round(baselineShopping || 390));setIncome(Math.max(3000, Math.round(Number(current.income) || 4200)))}}>Reset</button></div><p>Use the sliders or type exact dollar values to see how income and flexible spending affect only the next month estimate.</p><ForecastSlider label="Expected income" value={income} min={0} max={incomeMax} setValue={setIncome}/><ForecastSlider label="Dining & takeout" value={dining} min={0} max={diningMax} setValue={setDining}/><ForecastSlider label="Shopping" value={shopping} min={0} max={shoppingMax} setValue={setShopping}/><div className="sim-impact"><span><Sparkles/></span><div><small>SIMULATED IMPACT</small><strong>{savings > 1200 ? 'You have room to accelerate savings.' : savings >= 0 ? 'This plan stays above water.' : 'This plan would run above income.'}</strong></div></div></article><article className="panel forecast-breakdown"><div className="panel-head"><div><span className="overline">EXPECTED BREAKDOWN</span><h2>Likely drivers</h2></div></div>{forecastRows.slice(0,5).map((row)=><div className="forecast-row" key={row.name}><div><span>{row.name}</span><strong>{row.amount}</strong></div><div><i style={{width:`${Math.min(100, row.value)}%`}}/></div></div>)}<div className="model-note"><BrainCircuit/><div><strong>{forecast.method}</strong><p>This next month forecast uses your monthly spending history, recent trend and recent volatility.</p></div></div></article></div>
   </>
 }
 
@@ -1007,6 +1014,14 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
     setFullName(nextUser?.full_name || '')
     setEmails(nextUser?.monthly_email ?? true)
   }), [])
+
+  useEffect(() => {
+    if (message) notify({ tone: 'success', title: 'Update complete', message })
+  }, [message])
+
+  useEffect(() => {
+    if (error) notify({ tone: 'error', title: 'Action needed', message: error })
+  }, [error])
 
   async function saveProfile() {
     setSaving(true)
@@ -1095,7 +1110,7 @@ function SettingsPage({ theme, setTheme }: { theme: Theme; setTheme: (theme: The
   return <><PageHeader eyebrow="ACCOUNT" title="Settings."/><div className="settings-content settings-full">
     {message && <div className="auth-status">{message}</div>}
     {error && <div className="auth-error" role="alert">{error}</div>}
-    <section className="panel settings-section"><div className="panel-head"><div><span className="overline">PROFILE</span><h2>Personal information</h2></div><button className="button button-secondary button-compact" onClick={() => setFullName(user?.full_name || '')}>Reset</button></div><div className="profile-row"><span className="profile-avatar">{initials}</span><div><strong>{user?.full_name || 'Local account'}</strong><small>{user?.email || 'Sign in to save account preferences'}</small></div><span className="confidence"><User size={14}/>{user ? 'Signed in' : 'Local preview'}</span></div><div className="form-grid"><label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name"/></label><label>Email address<input type="email" value={user?.email || ''} placeholder="you@example.com" autoComplete="email" disabled/></label><label>Home currency<select defaultValue="USD"><option>USD, US Dollar</option><option>CAD, Canadian Dollar</option></select></label><label>Time zone<select defaultValue="CT"><option value="CT">Central Time (US)</option><option>Eastern Time (US)</option><option>Pacific Time (US)</option></select></label></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save profile'}</button></section>
+    <section className="panel settings-section"><div className="panel-head"><div><span className="overline">PROFILE</span><h2>Personal information</h2></div><button className="button button-secondary button-compact" onClick={() => setFullName(user?.full_name || '')}>Reset</button></div><div className="profile-row"><span className="profile-avatar">{initials}</span><div><strong>{user?.full_name || 'Local account'}</strong><small>{user?.email || 'Sign in to save account preferences'}</small></div><span className="confidence"><User size={14}/>{user ? 'Signed in' : 'Not signed in'}</span></div><div className="form-grid"><label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name"/></label><label>Email address<input type="email" value={user?.email || ''} placeholder="you@example.com" autoComplete="email" disabled/></label><label>Home currency<select defaultValue="USD"><option>USD, US Dollar</option><option>CAD, Canadian Dollar</option></select></label><label>Time zone<select defaultValue="CT"><option value="CT">Central Time (US)</option><option>Eastern Time (US)</option><option>Pacific Time (US)</option></select></label></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save profile'}</button></section>
     <section className="panel settings-section"><div><span className="overline">PREFERENCES</span><h2>Alerts and appearance</h2></div><div className="setting-row"><div><strong>Monthly insights email</strong><small>A summary when a new report is ready.</small></div><button className={emails?'switch on':'switch'} onClick={()=>setEmails(!emails)} aria-label="Toggle monthly email"><i/></button></div><div className="setting-row"><div><strong>Weekly digest</strong><small>Helpful spending highlights without opening the app.</small></div><button className={weeklyDigest?'switch on':'switch'} onClick={()=>setWeeklyDigest(!weeklyDigest)} aria-label="Toggle weekly digest"><i/></button></div><div className="setting-row"><div><strong>Spending spike alerts</strong><small>Flag a category when it moves sharply from your normal pattern.</small></div><button className={spendingAlerts?'switch on':'switch'} onClick={()=>setSpendingAlerts(!spendingAlerts)} aria-label="Toggle spending alerts"><i/></button></div><div className="setting-row"><div><strong>Large charge alerts</strong><small>Surface unusually large transactions in Analytics.</small></div><button className={largeChargeAlerts?'switch on':'switch'} onClick={()=>setLargeChargeAlerts(!largeChargeAlerts)} aria-label="Toggle large charge alerts"><i/></button></div><div className="setting-row"><div><strong>Appearance</strong><small>Choose how FinSim looks for you.</small></div><div className="theme-toggle"><button className={theme==='light'?'active':''} onClick={()=>setTheme('light')}><Sun/>Light</button><button className={theme==='dark'?'active':''} onClick={()=>setTheme('dark')}><Moon/>Dark</button></div></div><button className="button button-primary button-compact" disabled={saving || !user} onClick={saveProfile}>{saving ? 'Saving...' : 'Save preferences'}</button></section>
     <section className="panel settings-section"><div><span className="overline">PRIVACY</span><h2>Account and data controls</h2></div><div className="setting-row"><div><strong>Email verification</strong><small>{user?.email_verified ? 'Your account email is verified.' : 'Verify your email before processing statements.'}</small></div><span className="confidence"><ShieldCheck size={14}/>{user?.email_verified ? 'Verified' : 'Needs verification'}</span></div><div className="setting-row"><div><strong>Statement uploads</strong><small>Add PDFs or reprocess corrected files from the upload workspace.</small></div><Link className="button button-primary button-compact" to="/statements">Open upload workspace</Link></div><div className="setting-row"><div><strong>Cached insights</strong><small>Clear the local analytics snapshot stored in this browser.</small></div><button className="button button-secondary button-compact" onClick={clearInsights}>Clear local cache</button></div><div className="setting-row"><div><strong>Session</strong><small>Sign out if this is a shared computer.</small></div><button className="button button-secondary button-compact" onClick={signOutFromSettings}>Sign out</button></div><div className="data-delete-panel"><div><span className="overline">DATA DELETION</span><h3>Delete saved statement data</h3><p>This removes uploaded statement results, parsed transactions and learned merchant rules from this account. Your sign-in account remains available.</p></div><div className="data-delete-form"><label>Password<input type="password" value={deletionPassword} onChange={(event)=>setDeletionPassword(event.target.value)} placeholder="Confirm password" minLength={8} maxLength={128} autoComplete="current-password" disabled={!user || deleting}/></label>{deletionChallengeId&&<label>Verification code<input value={deletionCode} onChange={(event)=>setDeletionCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} inputMode="numeric" autoComplete="one-time-code" disabled={deleting}/></label>}{localDeletionCode&&<small className="auth-code-hint">Local test code: <strong>{localDeletionCode}</strong></small>}<div className="data-delete-actions"><button className="button button-secondary button-compact" type="button" onClick={requestDataDeletionCode} disabled={!user || deleting}>{deleting ? 'Working...' : deletionChallengeId ? 'Send new code' : 'Send deletion code'}</button><button className="button button-danger button-compact" type="button" onClick={confirmDataDeletion} disabled={!user || !deletionChallengeId || deleting}>{deleting ? 'Deleting...' : 'Delete account data'}</button></div></div></div><p className="settings-note">FinSim does not ask for bank credentials. Statement files are used to build reports, and saved account data stays scoped to the signed-in user.</p></section>
   </div></>
@@ -1108,12 +1123,21 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [verificationToken, setVerificationToken] = useState('')
+  const [needsEmailVerification, setNeedsEmailVerification] = useState(false)
   const [loginChallengeId, setLoginChallengeId] = useState('')
   const [loginCode, setLoginCode] = useState('')
   const [localLoginCode, setLocalLoginCode] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (statusMessage) notify({ tone: 'progress', title: isSignup ? 'Account update' : 'Sign in update', message: statusMessage })
+  }, [isSignup, statusMessage])
+
+  useEffect(() => {
+    if (error) notify({ tone: 'error', title: 'Check this', message: error })
+  }, [error])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1141,13 +1165,15 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
     setLoginChallengeId('')
     setLoginCode('')
     setLocalLoginCode('')
+    setNeedsEmailVerification(false)
     try {
       if (isSignup) {
         setFullName(cleanedName)
         setEmail(cleanedEmail)
         const result = await signup(cleanedName, cleanedEmail, password)
         setVerificationToken(result.verification_token)
-        setStatusMessage('Account created. Use the local verification token below to verify the email.')
+        setNeedsEmailVerification(true)
+        setStatusMessage(result.verification_token ? 'Account created. Use the local verification token below to verify the email.' : 'Account created. Check your email for the verification token.')
       } else {
         setEmail(cleanedEmail)
         const result = await requestSigninCode(cleanedEmail, password)
@@ -1175,6 +1201,7 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
       await verifyEmail(cleanedToken)
       const result = await requestSigninCode(cleanedEmail, password)
       setVerificationToken('')
+      setNeedsEmailVerification(false)
       setLoginChallengeId(result.login_challenge_id)
       setLocalLoginCode(result.verification_code)
       setStatusMessage('Email verified. Enter the six digit login code to open your workspace.')
@@ -1207,7 +1234,7 @@ function AuthPage({ kind }: { kind: 'signin' | 'signup' }) {
     }
   }
 
-  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit} noValidate><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify email, then confirm a login code.':'Sign in with your password, then confirm the code sent to your email.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" maxLength={254} autoComplete="email" inputMode="email" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} maxLength={128} autoComplete={isSignup ? 'new-password' : 'current-password'} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember this device</label><a href="#" onClick={(event)=>event.preventDefault()} aria-disabled="true">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{verificationToken&&<label>Local verification token<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} maxLength={160} autoComplete="one-time-code" /></label>}{loginChallengeId&&<><label>Login verification code<input value={loginCode} onChange={(event)=>setLoginCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required/></label>{localLoginCode&&<small className="auth-code-hint">Local test code: <strong>{localLoginCode}</strong></small>}</>}{error&&<div className="auth-error" role="alert">{error}</div>}{verificationToken?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and send login code'} <ArrowRight/></button>:loginChallengeId?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyLoginAndContinue}>{loading?'Checking...':'Verify code and open app'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Send login code'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Insights appear after statement processing.</small>}</form></main></div>
+  return <div className="auth-page"><div className="auth-brand"><Logo/><div><span className="overline">FINANCE, SIMPLIFIED</span><h1>Turn statements<br/>into confidence.</h1><p>Understand where your money goes, what looks unusual and what next month might hold.</p></div><small>© 2026 FinSim.</small></div><main className="auth-form-wrap"><Link to="/" className="auth-back">← Back home</Link><form className="auth-form" onSubmit={submit} noValidate><span className="mobile-auth-logo"><Logo/></span><span className="overline">{isSignup?'CREATE YOUR WORKSPACE':'WELCOME BACK'}</span><h2>{isSignup?'Start with a clean workspace.':'Good to see you.'}</h2><p>{isSignup?'Create an account, verify email, then confirm a login code.':'Sign in with your password, then confirm the code sent to your email.'}</p>{isSignup&&<label>Full name<input value={fullName} onChange={(event)=>setFullName(event.target.value)} placeholder="Your name" minLength={2} maxLength={80} autoComplete="name" required/></label>}<label>Email address<input type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="you@example.com" maxLength={254} autoComplete="email" inputMode="email" required/></label><label>Password<div className="password-input"><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder={isSignup?'At least 8 characters':'Your password'} minLength={8} maxLength={128} autoComplete={isSignup ? 'new-password' : 'current-password'} required/><LockKeyhole/></div></label>{!isSignup&&<div className="forgot"><label><input type="checkbox"/> Remember this device</label><a href="#" onClick={(event)=>event.preventDefault()} aria-disabled="true">Forgot password?</a></div>}{statusMessage&&<div className="auth-status">{statusMessage}</div>}{needsEmailVerification&&<label>{verificationToken ? 'Local verification token' : 'Verification token'}<input value={verificationToken} onChange={(event)=>setVerificationToken(event.target.value)} placeholder="Paste the token from your email" maxLength={160} autoComplete="one-time-code" /></label>}{loginChallengeId&&<><label>Login verification code<input value={loginCode} onChange={(event)=>setLoginCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" maxLength={6} autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" required/></label>{localLoginCode&&<small className="auth-code-hint">Local test code: <strong>{localLoginCode}</strong></small>}</>}{error&&<div className="auth-error" role="alert">{error}</div>}{needsEmailVerification?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyAndContinue}>{loading?'Working...':'Verify email and send login code'} <ArrowRight/></button>:loginChallengeId?<button className="button button-primary auth-submit" type="button" disabled={loading} onClick={verifyLoginAndContinue}>{loading?'Checking...':'Verify code and open app'} <ArrowRight/></button>:<button className="button button-primary auth-submit" type="submit" disabled={loading}>{loading?'Working...':isSignup?'Create account':'Send login code'} <ArrowRight/></button>}<small className="auth-switch">{isSignup?'Already have an account?':'Need an account?'} <Link to={isSignup?'/signin':'/signup'}>{isSignup?'Sign in':'Sign up'}</Link></small>{isSignup&&<small className="terms">New accounts start empty. Insights appear after statement processing.</small>}</form></main></div>
 }
 
 function NotFound(){return <div className="not-found"><Logo/><span>404</span><h1>That page wandered off.</h1><p>Your finances are still exactly where you left them.</p><Link className="button button-primary" to="/">Back home</Link></div>}
@@ -1219,11 +1246,11 @@ export default function App() {
   // Keeping the account pages in one route list ensures that every one
   // receives the same navigation shell and responsive behavior.
   const appRoutes = useMemo(() => [
-    { path: '/dashboard', element: <Dashboard/> },
+    { path: '/dashboard', element: <WorkspaceRedirect/> },
     { path: '/analytics', element: <Analytics/> },
     { path: '/forecast', element: <Forecast/> },
     { path: '/statements', element: <Statements/> },
     { path: '/settings', element: <SettingsPage theme={theme} setTheme={setTheme}/> },
   ], [theme])
-  return <Routes><Route path="/" element={<Landing theme={theme} setTheme={setTheme}/>}/><Route path="/signin" element={<AuthPage kind="signin"/>}/><Route path="/signup" element={<AuthPage kind="signup"/>}/>{appRoutes.map(r=><Route key={r.path} path={r.path} element={<AppShell theme={theme} setTheme={setTheme}>{r.element}</AppShell>}/>) }<Route path="*" element={<NotFound/>}/></Routes>
+  return <><Routes><Route path="/" element={<Landing theme={theme} setTheme={setTheme}/>}/><Route path="/signin" element={<AuthPage kind="signin"/>}/><Route path="/signup" element={<AuthPage kind="signup"/>}/>{appRoutes.map(r=><Route key={r.path} path={r.path} element={<AppShell theme={theme} setTheme={setTheme}>{r.element}</AppShell>}/>) }<Route path="*" element={<NotFound/>}/></Routes><ToastViewport /></>
 }

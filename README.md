@@ -167,4 +167,4 @@ See [SECURITY.md](SECURITY.md) and [docs/deployment.md](docs/deployment.md) befo
 
 ## License
 
-This project currently uses the repository license in [LICENSE](LICENSE). Review it as a team before using the project outside academic or portfolio work.
+This project currently uses the repository license in [LICENSE](LICENSE).
